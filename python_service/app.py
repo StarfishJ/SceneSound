@@ -7,6 +7,7 @@ import os
 from places365_model import Places365Model
 import logging
 from dotenv import load_dotenv
+import io
 
 # 配置日志
 logging.basicConfig(level=logging.DEBUG)
@@ -21,16 +22,14 @@ PORT = int(os.getenv('PORT', 5000))
 ALLOWED_ORIGINS = os.getenv('ALLOWED_ORIGINS', 'https://scene-sound.vercel.app')
 
 # 配置CORS
-CORS(app, resources={
-    r"/*": {
-        "origins": ALLOWED_ORIGINS.split(','),
-        "methods": ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
-        "allow_headers": ["Content-Type", "Authorization", "Accept", "Origin"],
-        "expose_headers": ["Content-Type", "Authorization"],
-        "supports_credentials": True
-    }
-})
+CORS(app, origins=['https://scene-sound.vercel.app'], 
+     methods=['GET', 'POST', 'OPTIONS'],
+     allow_headers=['Content-Type', 'Authorization', 'Accept'])
 app.debug = True  # 启用调试模式
+
+# 配置常量
+MAX_IMAGE_SIZE = (800, 800)  # 最大图片尺寸
+MAX_FILE_SIZE = 5 * 1024 * 1024  # 5MB
 
 # 初始化模型
 try:
@@ -107,30 +106,69 @@ def test():
     logger.info("访问测试路由 /test")
     return "服务器正在运行"
 
+def process_image(image_file):
+    """处理上传的图片，包括大小检查和压缩"""
+    # 检查文件大小
+    image_file.seek(0, io.SEEK_END)
+    file_size = image_file.tell()
+    image_file.seek(0)
+    
+    if file_size > MAX_FILE_SIZE:
+        raise ValueError('Image file too large (max 5MB)')
+        
+    # 读取和压缩图片
+    image = Image.open(image_file).convert('RGB')
+    
+    # 如果图片太大，进行缩放
+    if image.size[0] > MAX_IMAGE_SIZE[0] or image.size[1] > MAX_IMAGE_SIZE[1]:
+        image.thumbnail(MAX_IMAGE_SIZE, Image.Resampling.LANCZOS)
+        
+    return image
+
 @app.route('/analyze', methods=['POST'])
 def analyze_image():
     logger.info(f"收到分析请求 - 路径: {request.path}")
     logger.info(f"请求方法: {request.method}")
     logger.info(f"请求头: {dict(request.headers)}")
+    logger.info(f"表单数据: {dict(request.form)}")
+    logger.info(f"文件: {dict(request.files)}")
+    
     try:
         scenes = []
         
         # 处理图片输入
         if 'image' in request.files:
             image_file = request.files['image']
+            if not image_file.filename:
+                logger.warning("收到空的图片文件")
+                return jsonify({'error': 'Empty image file'}), 400
+                
             logger.info(f"收到图片：{image_file.filename}")
-            image = Image.open(image_file).convert('RGB')
-            image_scenes = model.predict(image=image)
-            scenes.extend(image_scenes)
-            logger.info(f"图片分析结果：{image_scenes}")
+            try:
+                # 处理和压缩图片
+                image = process_image(image_file)
+                logger.info(f"图片处理完成，尺寸: {image.size}")
+                
+                # 预测场景
+                image_scenes = model.predict(image=image)
+                scenes.extend(image_scenes)
+                logger.info(f"图片分析结果：{image_scenes}")
+            except ValueError as ve:
+                logger.error(f"图片验证错误：{str(ve)}")
+                return jsonify({'error': str(ve)}), 400
+            except Exception as e:
+                logger.error(f"处理图片时出错：{str(e)}", exc_info=True)
+                return jsonify({'error': f'Image processing error: {str(e)}'}), 400
             
         # 处理文字输入
         if request.form.get('text'):
             text = request.form.get('text').strip()
+            if not text:
+                logger.warning("收到空的文本输入")
+                return jsonify({'error': 'Empty text input'}), 400
+                
             logger.info(f"收到文字：{text}")
-            # 将文字分割成关键词
             keywords = text.lower().split()
-            # 为每个关键词创建一个场景
             for keyword in keywords:
                 text_scene = {
                     'scene': keyword,
@@ -140,8 +178,8 @@ def analyze_image():
             logger.info(f"文字分析结果：{scenes[-len(keywords):]}")
             
         if not scenes:
-            logger.warning("没有提供输入")
-            return jsonify({'error': 'No input provided'}), 400
+            logger.warning("没有提供有效的输入")
+            return jsonify({'error': 'No valid input provided'}), 400
             
         # 按概率排序并去重（基于场景名称）
         unique_scenes = {}
@@ -164,6 +202,23 @@ def analyze_image():
             'success': False,
             'error': str(e)
         }), 500
+
+@app.after_request
+def after_request(response):
+    origin = request.headers.get('Origin')
+    if origin == 'https://scene-sound.vercel.app':
+        response.headers['Access-Control-Allow-Origin'] = origin
+    response.headers['Access-Control-Allow-Methods'] = 'GET, POST, OPTIONS'
+    response.headers['Access-Control-Allow-Headers'] = 'Content-Type, Authorization, Accept'
+    return response
+
+# 添加健康检查端点
+@app.route('/health', methods=['GET'])
+def health_check():
+    return jsonify({
+        'status': 'healthy',
+        'message': 'Service is running'
+    })
 
 if __name__ == '__main__':
     logger.info("启动服务器...")
