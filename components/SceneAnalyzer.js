@@ -31,9 +31,19 @@ export default function SceneAnalyzer() {
       return;
     }
 
+    // 创建图片预览
     const reader = new FileReader();
     reader.onload = () => {
-      setImagePreview(reader.result);
+      // 创建图片元素来检查尺寸
+      const img = new Image();
+      img.onload = () => {
+        // 如果图片太大，显示警告
+        if (img.width > 800 || img.height > 800) {
+          console.log('图片将被自动调整大小以优化性能');
+        }
+        setImagePreview(reader.result);
+      };
+      img.src = reader.result;
     };
     reader.readAsDataURL(file);
     setSelectedImage(file);
@@ -142,12 +152,11 @@ export default function SceneAnalyzer() {
       
       const response = await fetch(`${baseUrl}/analyze`, {
         method: 'POST',
+        mode: 'cors',
         headers: {
-          'Accept': 'application/json',
-          'Origin': 'https://scene-sound.vercel.app'
+          'Accept': 'application/json'
         },
-        body: formData,
-        credentials: 'include'
+        body: formData
       });
 
       console.log('响应状态:', response.status);
