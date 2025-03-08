@@ -1,13 +1,12 @@
 from flask import Flask, request, jsonify, render_template_string
 from flask_cors import CORS
-import torch
-from torchvision import transforms
 from PIL import Image
 import os
 from places365_model import Places365Model
 import logging
 from dotenv import load_dotenv
 import io
+import gc
 
 # 配置日志
 logging.basicConfig(level=logging.DEBUG)
@@ -19,24 +18,28 @@ app = Flask(__name__)
 
 # 获取环境变量
 PORT = int(os.getenv('PORT', 5000))
-ALLOWED_ORIGINS = os.getenv('ALLOWED_ORIGINS', 'https://scene-sound.vercel.app')
+ALLOWED_ORIGINS = os.getenv(
+    'ALLOWED_ORIGINS', 
+    'https://scene-sound.vercel.app'
+)
 
 # 配置CORS
-CORS(app, 
-     resources={
-         r"/analyze": {
-             "origins": ALLOWED_ORIGINS.split(','),
-             "methods": ["POST", "OPTIONS"],
-             "allow_headers": ["Content-Type", "Accept"],
-             "max_age": 3600
-         },
-         r"/health": {
-             "origins": "*",
-             "methods": ["GET"],
-             "max_age": 3600
-         }
-     },
-     supports_credentials=False
+CORS(
+    app, 
+    resources={
+        r"/analyze": {
+            "origins": ALLOWED_ORIGINS.split(','),
+            "methods": ["POST", "OPTIONS"],
+            "allow_headers": ["Content-Type", "Accept"],
+            "max_age": 3600
+        },
+        r"/health": {
+            "origins": "*",
+            "methods": ["GET"],
+            "max_age": 3600
+        }
+    },
+    supports_credentials=False
 )
 app.debug = True  # 启用调试模式
 
@@ -63,31 +66,57 @@ HTML_TEMPLATE = '''
         body { font-family: Arial, sans-serif; max-width: 800px; margin: 0 auto; padding: 20px; }
         .form-group { margin-bottom: 20px; }
         #result { margin-top: 20px; white-space: pre-wrap; }
+        .loading { display: none; color: #666; }
+        .error { color: red; }
     </style>
 </head>
 <body>
     <h1>场景分析测试</h1>
     <form id="uploadForm">
         <div class="form-group">
-            <label for="image">选择图片：</label>
+            <label for="image">选择图片（最大5MB）：</label>
             <input type="file" id="image" name="image" accept="image/*">
         </div>
         <button type="submit">分析</button>
+        <div id="loading" class="loading">处理中，请稍候...</div>
     </form>
     <div id="result"></div>
 
     <script>
-        document.getElementById('uploadForm').onsubmit = async (e) => {
+        const form = document.getElementById('uploadForm');
+        const loading = document.getElementById('loading');
+        const result = document.getElementById('result');
+        const imageInput = document.getElementById('image');
+
+        imageInput.onchange = function() {
+            const file = this.files[0];
+            if (file) {
+                if (file.size > 5 * 1024 * 1024) {
+                    result.innerHTML = '<div class="error">错误：图片大小不能超过5MB</div>';
+                    this.value = '';
+                    return;
+                }
+                if (!file.type.startsWith('image/')) {
+                    result.innerHTML = '<div class="error">错误：请选择图片文件</div>';
+                    this.value = '';
+                    return;
+                }
+            }
+        };
+
+        form.onsubmit = async (e) => {
             e.preventDefault();
             const formData = new FormData();
-            const imageFile = document.getElementById('image').files[0];
+            const imageFile = imageInput.files[0];
             
             if (!imageFile) {
-                document.getElementById('result').textContent = '错误：请选择一张图片';
+                result.innerHTML = '<div class="error">错误：请选择一张图片</div>';
                 return;
             }
             
             formData.append('image', imageFile);
+            loading.style.display = 'block';
+            result.textContent = '';
             
             try {
                 const response = await fetch('/analyze', {
@@ -101,9 +130,11 @@ HTML_TEMPLATE = '''
                     throw new Error(`请求失败: ${response.status}`);
                 }
                 const data = await response.json();
-                document.getElementById('result').textContent = JSON.stringify(data, null, 2);
+                result.textContent = JSON.stringify(data, null, 2);
             } catch (error) {
-                document.getElementById('result').textContent = '错误：' + error.message;
+                result.innerHTML = `<div class="error">错误：${error.message}</div>`;
+            } finally {
+                loading.style.display = 'none';
             }
         };
     </script>
@@ -127,31 +158,59 @@ def test():
 
 def process_image(image_file):
     """处理上传的图片，包括大小检查和压缩"""
-    # 检查文件大小
-    image_file.seek(0, io.SEEK_END)
-    file_size = image_file.tell()
-    image_file.seek(0)
-    
-    if file_size > MAX_FILE_SIZE:
-        raise ValueError('Image file too large (max 5MB)')
+    try:
+        # 检查文件大小
+        image_file.seek(0, io.SEEK_END)
+        file_size = image_file.tell()
+        image_file.seek(0)
         
-    # 读取和压缩图片
-    image = Image.open(image_file).convert('RGB')
-    
-    # 如果图片太大，进行缩放
-    if image.size[0] > MAX_IMAGE_SIZE[0] or image.size[1] > MAX_IMAGE_SIZE[1]:
-        image.thumbnail(MAX_IMAGE_SIZE, Image.Resampling.LANCZOS)
+        if file_size > MAX_FILE_SIZE:
+            raise ValueError('Image file too large (max 5MB)')
         
-    return image
+        # 使用 PIL 的高效读取模式
+        image = Image.open(image_file)
+        
+        # 检查图片格式
+        if image.format not in ['JPEG', 'PNG', 'WebP']:
+            raise ValueError(
+                'Unsupported image format. Please use JPEG, PNG or WebP'
+            )
+            
+        # 转换为RGB模式（如果需要）
+        if image.mode != 'RGB':
+            image = image.convert('RGB')
+            
+        # 如果图片太大，进行缩放
+        if (image.size[0] > MAX_IMAGE_SIZE[0] or 
+            image.size[1] > MAX_IMAGE_SIZE[1]):
+            # 计算缩放比例
+            ratio = min(
+                MAX_IMAGE_SIZE[0] / image.size[0],
+                MAX_IMAGE_SIZE[1] / image.size[1]
+            )
+            new_size = (
+                int(image.size[0] * ratio),
+                int(image.size[1] * ratio)
+            )
+            image = image.resize(new_size, Image.Resampling.LANCZOS)
+            
+        # 强制加载图片数据到内存并释放文件句柄
+        image.load()
+        image_file.close()
+        
+        # 主动进行垃圾回收
+        gc.collect()
+        
+        return image
+    except Exception as e:
+        logger.error(f"处理图片时出错: {str(e)}")
+        if image_file:
+            image_file.close()
+        raise
 
 @app.route('/analyze', methods=['POST'])
 def analyze_image():
-    logger.info(f"收到分析请求 - 路径: {request.path}")
-    logger.info(f"请求方法: {request.method}")
-    logger.info(f"请求头: {dict(request.headers)}")
-    logger.info(f"表单数据: {dict(request.form)}")
-    logger.info(f"文件: {dict(request.files)}")
-    
+    image = None
     try:
         scenes = []
         
@@ -172,12 +231,24 @@ def analyze_image():
                 image_scenes = model.predict(image=image)
                 scenes.extend(image_scenes)
                 logger.info(f"图片分析结果：{image_scenes}")
+                
             except ValueError as ve:
                 logger.error(f"图片验证错误：{str(ve)}")
                 return jsonify({'error': str(ve)}), 400
             except Exception as e:
-                logger.error(f"处理图片时出错：{str(e)}", exc_info=True)
-                return jsonify({'error': f'Image processing error: {str(e)}'}), 400
+                logger.error(
+                    f"处理图片时出错：{str(e)}", 
+                    exc_info=True
+                )
+                return jsonify(
+                    {'error': f'Image processing error: {str(e)}'}
+                ), 400
+            finally:
+                # 清理图片对象
+                if image:
+                    image.close()
+                    del image
+                    gc.collect()
             
         # 处理文字输入
         if request.form.get('text'):
