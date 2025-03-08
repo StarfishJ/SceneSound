@@ -75,7 +75,7 @@ export default function SceneAnalyzer() {
   // 获取Spotify访问令牌
   const getSpotifyToken = async () => {
     try {
-      const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/spotify-token`);
+      const response = await fetch('/api/spotify-token');
       if (!response.ok) {
         throw new Error(`Token request failed: ${response.status}`);
       }

@@ -18,10 +18,12 @@ app = Flask(__name__)
 
 # 获取环境变量
 PORT = int(os.getenv('PORT', 5000))
-ALLOWED_ORIGINS = os.getenv('ALLOWED_ORIGINS', '*')
+ALLOWED_ORIGINS = os.getenv('ALLOWED_ORIGINS', 'https://scene-sound.vercel.app')
 
 # 配置CORS
-CORS(app, resources={r"/*": {"origins": ALLOWED_ORIGINS}})
+CORS(app, resources={r"/*": {"origins": ALLOWED_ORIGINS.split(','),
+                            "methods": ["GET", "POST", "OPTIONS"],
+                            "allow_headers": ["Content-Type", "Authorization"]}})
 app.debug = True  # 启用调试模式
 
 # 初始化模型
