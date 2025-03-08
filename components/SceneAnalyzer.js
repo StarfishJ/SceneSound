@@ -129,18 +129,32 @@ export default function SceneAnalyzer() {
       const formData = new FormData();
       if (selectedImage) {
         formData.append('image', selectedImage);
+        console.log('添加图片到请求:', selectedImage.name);
       }
       if (textInput.trim()) {
         formData.append('text', textInput.trim());
+        console.log('添加文本到请求:', textInput.trim());
       }
       
-      const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/analyze`, {
+      // 移除URL末尾可能的斜杠
+      const baseUrl = (process.env.NEXT_PUBLIC_BACKEND_URL || 'https://scenesound-backend.onrender.com').replace(/\/$/, '');
+      console.log('发送请求到:', `${baseUrl}/analyze`);
+      
+      const response = await fetch(`${baseUrl}/analyze`, {
         method: 'POST',
+        headers: {
+          'Accept': 'application/json',
+          'Origin': 'https://scene-sound.vercel.app'
+        },
         body: formData,
+        credentials: 'include'
       });
 
+      console.log('响应状态:', response.status);
       if (!response.ok) {
-        throw new Error(`Request failed with status: ${response.status}`);
+        const errorText = await response.text();
+        console.error('请求失败:', response.status, errorText);
+        throw new Error(`Request failed with status: ${response.status} - ${errorText}`);
       }
 
       const data = await response.json();
