@@ -1,0 +1,22 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* 自定义样式 */
+.rhap_container {
+  background-color: transparent !important;
+  box-shadow: none !important;
+  padding: 0 !important;
+}
+
+.rhap_main-controls-button {
+  color: #0ea5e9 !important;
+}
+
+.rhap_progress-filled {
+  background-color: #0ea5e9 !important;
+}
+
+.rhap_progress-indicator {
+  background: #0ea5e9 !important;
+} 
