@@ -22,9 +22,22 @@ PORT = int(os.getenv('PORT', 5000))
 ALLOWED_ORIGINS = os.getenv('ALLOWED_ORIGINS', 'https://scene-sound.vercel.app')
 
 # 配置CORS
-CORS(app, origins=['https://scene-sound.vercel.app'], 
-     methods=['GET', 'POST', 'OPTIONS'],
-     allow_headers=['Content-Type', 'Authorization', 'Accept'])
+CORS(app, 
+     resources={
+         r"/analyze": {
+             "origins": ALLOWED_ORIGINS.split(','),
+             "methods": ["POST", "OPTIONS"],
+             "allow_headers": ["Content-Type", "Accept"],
+             "max_age": 3600
+         },
+         r"/health": {
+             "origins": "*",
+             "methods": ["GET"],
+             "max_age": 3600
+         }
+     },
+     supports_credentials=False
+)
 app.debug = True  # 启用调试模式
 
 # 配置常量
@@ -77,10 +90,16 @@ HTML_TEMPLATE = '''
             formData.append('image', imageFile);
             
             try {
-                const response = await fetch('http://localhost:5000/analyze', {
+                const response = await fetch('/analyze', {
                     method: 'POST',
+                    headers: {
+                        'Accept': 'application/json'
+                    },
                     body: formData
                 });
+                if (!response.ok) {
+                    throw new Error(`请求失败: ${response.status}`);
+                }
                 const data = await response.json();
                 document.getElementById('result').textContent = JSON.stringify(data, null, 2);
             } catch (error) {
@@ -205,11 +224,19 @@ def analyze_image():
 
 @app.after_request
 def after_request(response):
+    # 获取请求的路径
+    path = request.path
     origin = request.headers.get('Origin')
-    if origin == 'https://scene-sound.vercel.app':
+    
+    # 为不同的路径设置不同的 CORS 头
+    if path == '/analyze' and origin == 'https://scene-sound.vercel.app':
         response.headers['Access-Control-Allow-Origin'] = origin
-    response.headers['Access-Control-Allow-Methods'] = 'GET, POST, OPTIONS'
-    response.headers['Access-Control-Allow-Headers'] = 'Content-Type, Authorization, Accept'
+        response.headers['Access-Control-Allow-Methods'] = 'POST, OPTIONS'
+        response.headers['Access-Control-Allow-Headers'] = 'Content-Type, Accept'
+    elif path == '/health':
+        response.headers['Access-Control-Allow-Origin'] = '*'
+        response.headers['Access-Control-Allow-Methods'] = 'GET'
+    
     return response
 
 # 添加健康检查端点
