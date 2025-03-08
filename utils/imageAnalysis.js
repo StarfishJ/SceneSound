@@ -3,7 +3,7 @@ import path from 'path';
 import FormData from 'form-data';
 import fetch from 'node-fetch';
 
-const PYTHON_SERVICE_URL = 'http://localhost:5000/analyze';
+const PYTHON_SERVICE_URL = process.env.NEXT_PUBLIC_BACKEND_URL || 'https://scenesound-backend.onrender.com/analyze';
 
 // 预定义的场景关键词映射
 const SCENE_KEYWORDS = {
