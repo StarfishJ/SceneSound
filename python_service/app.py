@@ -21,9 +21,15 @@ PORT = int(os.getenv('PORT', 5000))
 ALLOWED_ORIGINS = os.getenv('ALLOWED_ORIGINS', 'https://scene-sound.vercel.app')
 
 # 配置CORS
-CORS(app, resources={r"/*": {"origins": ALLOWED_ORIGINS.split(','),
-                            "methods": ["GET", "POST", "OPTIONS"],
-                            "allow_headers": ["Content-Type", "Authorization"]}})
+CORS(app, resources={
+    r"/*": {
+        "origins": ALLOWED_ORIGINS.split(','),
+        "methods": ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+        "allow_headers": ["Content-Type", "Authorization", "Accept", "Origin"],
+        "expose_headers": ["Content-Type", "Authorization"],
+        "supports_credentials": True
+    }
+})
 app.debug = True  # 启用调试模式
 
 # 初始化模型
@@ -103,7 +109,9 @@ def test():
 
 @app.route('/analyze', methods=['POST'])
 def analyze_image():
-    logger.info("收到分析请求")
+    logger.info(f"收到分析请求 - 路径: {request.path}")
+    logger.info(f"请求方法: {request.method}")
+    logger.info(f"请求头: {dict(request.headers)}")
     try:
         scenes = []
         
@@ -132,6 +140,7 @@ def analyze_image():
             logger.info(f"文字分析结果：{scenes[-len(keywords):]}")
             
         if not scenes:
+            logger.warning("没有提供输入")
             return jsonify({'error': 'No input provided'}), 400
             
         # 按概率排序并去重（基于场景名称）
@@ -142,6 +151,7 @@ def analyze_image():
                 unique_scenes[scene_name] = scene
                 
         scenes = sorted(unique_scenes.values(), key=lambda x: x['probability'], reverse=True)
+        logger.info(f"最终分析结果：{scenes}")
             
         return jsonify({
             'success': True,
