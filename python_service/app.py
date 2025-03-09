@@ -306,6 +306,51 @@ def analyze_image():
             'error': str(e)
         }), 500
 
+@app.route('/analyze/text', methods=['POST', 'OPTIONS'])
+def analyze_text():
+    """处理纯文本分析请求"""
+    try:
+        logger.info("开始处理文本分析请求")
+        logger.info(f"请求头: {dict(request.headers)}")
+        
+        if not request.is_json:
+            logger.error("请求不是JSON格式")
+            return jsonify({'error': 'Request must be JSON'}), 400
+            
+        data = request.get_json()
+        if not data or 'text' not in data:
+            logger.error("请求中没有文本内容")
+            return jsonify({'error': 'No text in request'}), 400
+            
+        text = data['text'].strip()
+        if not text:
+            logger.error("文本内容为空")
+            return jsonify({'error': 'Empty text'}), 400
+            
+        logger.info(f"收到文本：{text}")
+        
+        # 预测场景
+        start_time = time.time()
+        text_scenes = model.predict(text=text)
+        predict_time = time.time() - start_time
+        logger.info(f"场景预测完成，耗时: {predict_time:.2f}秒")
+        
+        return jsonify({
+            'success': True,
+            'scenes': text_scenes,
+            'processing_time': {
+                'prediction': predict_time,
+                'total': predict_time
+            }
+        })
+            
+    except Exception as e:
+        logger.error(f"处理文本分析请求时发生错误：{str(e)}", exc_info=True)
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
+
 @app.after_request
 def after_request(response):
     # 获取请求的路径和来源
@@ -313,20 +358,26 @@ def after_request(response):
     origin = request.headers.get('Origin')
     
     # 为不同的路径设置不同的 CORS 头
-    if (path == '/analyze' or path == '/analyze/text') and origin in ALLOWED_ORIGINS.split(','):
-        response.headers['Access-Control-Allow-Origin'] = origin
-        response.headers['Access-Control-Allow-Methods'] = 'POST, OPTIONS'
-        response.headers['Access-Control-Allow-Headers'] = 'Content-Type, Accept, Origin'
-        response.headers['Access-Control-Expose-Headers'] = 'Content-Type'
-        response.headers['Access-Control-Max-Age'] = '3600'
+    if path in ['/analyze', '/analyze/text'] and origin in ALLOWED_ORIGINS.split(','):
+        response.headers.update({
+            'Access-Control-Allow-Origin': origin,
+            'Access-Control-Allow-Methods': 'POST, OPTIONS',
+            'Access-Control-Allow-Headers': 'Content-Type, Accept, Origin',
+            'Access-Control-Expose-Headers': 'Content-Type',
+            'Access-Control-Max-Age': '3600'
+        })
     elif path == '/health':
-        response.headers['Access-Control-Allow-Origin'] = '*'
-        response.headers['Access-Control-Allow-Methods'] = 'GET'
+        response.headers.update({
+            'Access-Control-Allow-Origin': '*',
+            'Access-Control-Allow-Methods': 'GET'
+        })
     
     # 添加缓存控制头
-    response.headers['Cache-Control'] = 'no-cache, no-store, must-revalidate'
-    response.headers['Pragma'] = 'no-cache'
-    response.headers['Expires'] = '0'
+    response.headers.update({
+        'Cache-Control': 'no-cache, no-store, must-revalidate',
+        'Pragma': 'no-cache',
+        'Expires': '0'
+    })
     
     return response
 
