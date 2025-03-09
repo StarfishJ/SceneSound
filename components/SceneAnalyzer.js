@@ -126,8 +126,12 @@ export default function SceneAnalyzer() {
   };
 
   const analyzeImage = async () => {
-    if (!selectedImage && !textInput.trim()) {
-      setError('Please upload an image or enter text description');
+    // 检查输入情况
+    const hasImage = !!selectedImage;
+    const hasText = !!textInput.trim();
+
+    if (!hasImage && !hasText) {
+      setError('请上传图片或输入文字描述，或两者都提供');
       return;
     }
 
@@ -137,14 +141,19 @@ export default function SceneAnalyzer() {
 
     try {
       const formData = new FormData();
-      if (selectedImage) {
+      
+      if (hasImage) {
         formData.append('image', selectedImage);
         console.log('添加图片到请求:', selectedImage.name);
       }
-      if (textInput.trim()) {
+      
+      if (hasText) {
         formData.append('text', textInput.trim());
         console.log('添加文本到请求:', textInput.trim());
       }
+
+      // 记录分析类型
+      console.log('分析类型:', hasImage && hasText ? '图片和文字结合' : (hasImage ? '仅图片' : '仅文字'));
       
       // 移除URL末尾可能的斜杠
       const baseUrl = (process.env.NEXT_PUBLIC_BACKEND_URL || 'https://scenesound-backend.onrender.com').replace(/\/$/, '');
