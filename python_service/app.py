@@ -31,7 +31,15 @@ CORS(
         r"/analyze": {
             "origins": ALLOWED_ORIGINS.split(','),
             "methods": ["POST", "OPTIONS"],
-            "allow_headers": ["Content-Type", "Accept"],
+            "allow_headers": ["Content-Type", "Accept", "Origin"],
+            "expose_headers": ["Content-Type"],
+            "max_age": 3600
+        },
+        r"/analyze/text": {
+            "origins": ALLOWED_ORIGINS.split(','),
+            "methods": ["POST", "OPTIONS"],
+            "allow_headers": ["Content-Type", "Accept", "Origin"],
+            "expose_headers": ["Content-Type"],
             "max_age": 3600
         },
         r"/health": {
@@ -300,18 +308,25 @@ def analyze_image():
 
 @app.after_request
 def after_request(response):
-    # 获取请求的路径
+    # 获取请求的路径和来源
     path = request.path
     origin = request.headers.get('Origin')
     
     # 为不同的路径设置不同的 CORS 头
-    if path == '/analyze' and origin == 'https://scene-sound.vercel.app':
+    if (path == '/analyze' or path == '/analyze/text') and origin in ALLOWED_ORIGINS.split(','):
         response.headers['Access-Control-Allow-Origin'] = origin
         response.headers['Access-Control-Allow-Methods'] = 'POST, OPTIONS'
-        response.headers['Access-Control-Allow-Headers'] = 'Content-Type, Accept'
+        response.headers['Access-Control-Allow-Headers'] = 'Content-Type, Accept, Origin'
+        response.headers['Access-Control-Expose-Headers'] = 'Content-Type'
+        response.headers['Access-Control-Max-Age'] = '3600'
     elif path == '/health':
         response.headers['Access-Control-Allow-Origin'] = '*'
         response.headers['Access-Control-Allow-Methods'] = 'GET'
+    
+    # 添加缓存控制头
+    response.headers['Cache-Control'] = 'no-cache, no-store, must-revalidate'
+    response.headers['Pragma'] = 'no-cache'
+    response.headers['Expires'] = '0'
     
     return response
 
