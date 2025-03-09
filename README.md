@@ -26,17 +26,27 @@ The backend service is configured to run on Fly.io with the following specificat
 ## Development
 
 1. Clone the repository
+```bash
+git clone [your-repository-url]
+cd SceneSound
+```
+
 2. Install dependencies:
-   ```bash
-   npm install  # Frontend dependencies
-   cd python_service && pip install -r requirements.txt  # Backend dependencies
-   ```
+```bash
+npm install  # Frontend dependencies
+cd python_service && pip install -r requirements.txt  # Backend dependencies
+```
+
 3. Set up environment variables
+- Copy `.env.example` to `.env`
+- Fill in the required API keys and configuration:
+  - Spotify API credentials
+
 4. Run the development servers:
-   ```bash
-   npm run dev  # Frontend
-   python python_service/app.py  # Backend
-   ```
+```bash
+npm run dev  # Frontend
+python python_service/app.py  # Backend
+```
 
 ## Deployment
 
@@ -57,73 +67,90 @@ fly deploy
 - Music recommendations based on scenes
 - Spotify preview playback
 - Responsive design for mobile and desktop
+- Image upload and preview
+- Real-time playlist recommendations
 
 ## Technologies
 - Frontend: Next.js, React
 - Backend: Python, Flask
 - Deployment: Vercel (Frontend), Fly.io (Backend)
 - APIs: Spotify Web API
+- File Processing: Multer
 
-## 功能特点
-
-- 图片上传和预览
-- 使用 Google Cloud Vision API 进行图像分析
-- 基于图像内容使用 Spotify API 推荐音乐
-- 实时显示推荐的播放列表
-
-## 技术栈
-
-- Frontend: React.js + Next.js
-- APIs: Google Cloud Vision API, Spotify Web API
-- 文件处理: Multer
-
-## 安装步骤
-
-1. 克隆项目
-```bash
-git clone [your-repository-url]
-cd SceneSound
-```
-
-2. 安装依赖
-```bash
-npm install
-```
-
-3. 配置环境变量
-- 复制 `.env.example` 文件并重命名为 `.env`
-- 填入必要的 API 密钥和配置信息：
-  - Google Cloud Vision API 凭证
-  - Spotify API 凭证
-
-4. 运行开发服务器
-```bash
-npm run dev
-```
-
-## API 密钥获取方法
-
-### Google Cloud Vision API
-1. 访问 Google Cloud Console
-2. 创建新项目或选择现有项目
-3. 启用 Cloud Vision API
-4. 创建服务账号和密钥文件
-5. 下载 JSON 格式的凭证文件
+## API Key Setup
 
 ### Spotify API
-1. 访问 Spotify Developer Dashboard
-2. 创建新应用
-3. 获取 Client ID 和 Client Secret
+1. Visit Spotify Developer Dashboard
+2. Create a new application
+3. Obtain Client ID and Client Secret
 
-## 使用方法
+## Usage Instructions
 
-1. 访问网站首页
-2. 点击上传按钮选择图片
-3. 等待系统分析图片并生成推荐播放列表
-4. 查看推荐的音乐列表
+1. Visit the website homepage
+2. Click the upload button to select an image or enter text
+3. Wait for the system to analyze and generate recommended playlists
+4. View the recommended music list
 
-## 注意事项
+## Important Notes
 
-- 上传图片大小限制为 5MB
-- 确保所有环境变量都已正确配置
-- 需要稳定的网络连接以访问外部 API 
+- Image upload size limit: 5MB
+- Ensure all environment variables are correctly configured
+- Stable internet connection required for API access
+- Image compression is automatically applied when needed
+- Both image and text inputs can be used together
+
+## Troubleshooting
+
+If you encounter issues with Git permissions, follow these steps:
+
+1. Close all running development servers and IDE instances.
+2. Run the following command in PowerShell as an administrator:
+```powershell
+Remove-Item -Path ".next" -Recurse -Force
+```
+3. Rebuild the project:
+```bash
+npm run build
+```
+4. Update the `.gitignore` file with the following content:
+```
+# dependencies
+/node_modules
+/.pnp
+.pnp.js
+
+# testing
+/coverage
+
+# next.js
+/.next/
+/out/
+
+# production
+/build
+
+# misc
+.DS_Store
+*.pem
+
+# debug
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# local env files
+.env*.local
+
+# vercel
+.vercel
+
+# typescript
+*.tsbuildinfo
+next-env.d.ts
+```
+5. Commit and push the changes:
+```bash
+git add .
+git commit -m "Update gitignore and clean build files"
+git push
+```
