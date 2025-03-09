@@ -19,17 +19,19 @@ app = Flask(__name__)
 
 # 获取环境变量
 PORT = int(os.getenv('PORT', 5000))
-ALLOWED_ORIGINS = os.getenv(
-    'ALLOWED_ORIGINS', 
-    'https://scene-sound.vercel.app'
-)
+ALLOWED_ORIGINS = [
+    'https://scene-sound.vercel.app',
+    'http://localhost:3000',
+    'http://localhost:3001',
+    'http://localhost:10000'
+]
 
 # 配置CORS
 CORS(
     app, 
     resources={
         r"/analyze": {
-            "origins": ALLOWED_ORIGINS.split(','),
+            "origins": ALLOWED_ORIGINS,
             "methods": ["POST", "OPTIONS"],
             "allow_headers": ["Content-Type", "Accept", "Origin"],
             "expose_headers": ["Content-Type"],
@@ -243,9 +245,35 @@ def process_image(image_file):
         gc.collect()
         raise
 
-@app.route('/analyze', methods=['POST'])
+@app.after_request
+def after_request(response):
+    """处理CORS响应头"""
+    origin = request.headers.get('Origin')
+    
+    # 允许本地开发环境和生产环境
+    if origin:
+        response.headers.update({
+            'Access-Control-Allow-Origin': origin,
+            'Access-Control-Allow-Methods': 'POST, OPTIONS, GET',
+            'Access-Control-Allow-Headers': 'Content-Type, Accept, Origin',
+            'Access-Control-Expose-Headers': 'Content-Type',
+            'Access-Control-Max-Age': '3600',
+            'Cache-Control': 'no-store, no-cache, must-revalidate, max-age=0'
+        })
+    
+    # 处理预检请求
+    if request.method == 'OPTIONS':
+        return response
+    
+    return response
+
+@app.route('/analyze', methods=['POST', 'OPTIONS'])
 def analyze():
     """处理分析请求，支持图片和文本，或两者组合"""
+    # 处理预检请求
+    if request.method == 'OPTIONS':
+        return '', 204
+        
     image = None
     try:
         logger.info("开始处理分析请求")
@@ -360,40 +388,6 @@ def analyze():
             'error': str(e)
         }), 500
 
-@app.after_request
-def after_request(response):
-    """处理CORS响应头"""
-    origin = request.headers.get('Origin')
-    
-    if origin in ALLOWED_ORIGINS.split(','):
-        # 设置CORS响应头
-        response.headers.update({
-            'Access-Control-Allow-Origin': origin,
-            'Access-Control-Allow-Methods': 'POST, OPTIONS',
-            'Access-Control-Allow-Headers': 'Content-Type, Accept, Origin',
-            'Access-Control-Expose-Headers': 'Content-Type',
-            'Access-Control-Max-Age': '3600',
-            'Vary': 'Origin'
-        })
-        
-        # 对于预检请求，返回200状态码
-        if request.method == 'OPTIONS':
-            return response
-    elif request.path == '/health':
-        response.headers.update({
-            'Access-Control-Allow-Origin': '*',
-            'Access-Control-Allow-Methods': 'GET'
-        })
-    
-    # 添加缓存控制头
-    response.headers.update({
-        'Cache-Control': 'no-cache, no-store, must-revalidate',
-        'Pragma': 'no-cache',
-        'Expires': '0'
-    })
-    
-    return response
-
 # 添加健康检查端点
 @app.route('/health', methods=['GET'])
 def health_check():
@@ -403,5 +397,6 @@ def health_check():
     })
 
 if __name__ == '__main__':
+    port = int(os.getenv('PORT', 8080))
     logger.info("启动服务器...")
-    app.run(host='0.0.0.0', port=PORT) 
+    app.run(host='0.0.0.0', port=port) 

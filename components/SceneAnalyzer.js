@@ -233,6 +233,9 @@ export default function SceneAnalyzer() {
     setError('');
     setSceneData(null);
 
+    const maxRetries = 3;
+    let retryCount = 0;
+
     try {
       let scenes = [];
       
@@ -247,7 +250,9 @@ export default function SceneAnalyzer() {
       
       // 如果有图片，发送到后端分析
       if (hasImage) {
-        const baseUrl = (process.env.NEXT_PUBLIC_BACKEND_URL || 'https://scenesound-backend.onrender.com').replace(/\/$/, '');
+        const baseUrl = 'https://scenesound-backend.fly.dev';
+        console.log('Using backend URL:', baseUrl);
+        
         const formData = new FormData();
         
         let imageToSend = selectedImage;
@@ -256,29 +261,52 @@ export default function SceneAnalyzer() {
           imageToSend = await compressImage(selectedImage);
         }
         formData.append('image', imageToSend);
-        
-        const response = await fetch(`${baseUrl}/analyze`, {
-          method: 'POST',
-          mode: 'cors',
-          credentials: 'omit',
-          body: formData
-        });
-        
-        if (!response.ok) {
-          throw new Error(getErrorMessage(response.status, await response.text()));
+
+        while (retryCount < maxRetries) {
+          try {
+            console.log(`Attempt ${retryCount + 1} of ${maxRetries}`);
+            const response = await fetch(`${baseUrl}/analyze`, {
+              method: 'POST',
+              mode: 'cors',
+              credentials: 'omit',
+              headers: {
+                'Accept': 'application/json',
+                'Origin': window.location.origin
+              },
+              body: formData
+            });
+
+            console.log('Response status:', response.status);
+            console.log('Response headers:', Object.fromEntries(response.headers.entries()));
+
+            if (!response.ok) {
+              const errorText = await response.text();
+              console.error('Error response:', errorText);
+              throw new Error(getErrorMessage(response.status, errorText));
+            }
+
+            const data = await response.json();
+            console.log('Response data:', data);
+
+            if (!data.success) {
+              throw new Error(data.error || 'Scene analysis failed');
+            }
+
+            const imageScenes = data.scenes.map(scene => ({
+              ...scene,
+              source: 'image'
+            }));
+            scenes.push(...imageScenes);
+            break;
+          } catch (error) {
+            console.error(`Attempt ${retryCount + 1} failed:`, error);
+            retryCount++;
+            if (retryCount === maxRetries) {
+              throw error;
+            }
+            await new Promise(resolve => setTimeout(resolve, 1000 * retryCount));
+          }
         }
-        
-        const data = await response.json();
-        if (!data.success) {
-          throw new Error(data.error || 'Scene analysis failed');
-        }
-        
-        // 为图片分析结果添加来源标记
-        const imageScenes = data.scenes.map(scene => ({
-          ...scene,
-          source: 'image'
-        }));
-        scenes.push(...imageScenes);
       }
       
       // 获取音乐推荐
