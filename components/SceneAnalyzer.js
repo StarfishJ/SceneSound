@@ -273,7 +273,7 @@ export default function SceneAnalyzer() {
               console.log('添加文本到请求:', textInput.trim());
             }
 
-            console.log('发送图片分析请求');
+            console.log('发送组合分析请求');
             response = await fetch(`${baseUrl}/analyze`, {
               ...commonConfig,
               body: formData
@@ -314,14 +314,23 @@ export default function SceneAnalyzer() {
             const recommendations = await Promise.all(
               sceneResults.scenes.map(async (scene) => {
                 const tracks = await getSpotifyRecommendations(scene.scene);
-                return tracks || [];
+                return tracks ? tracks.map(track => ({
+                  ...track,
+                  sceneSource: scene.source // 添加场景来源到音乐信息中
+                })) : [];
               })
             );
 
-            sceneResults.playlist = Array.from(new Set(recommendations.flat()))
-              .slice(0, 5);
+            // 合并所有推荐，并确保不重复
+            const allTracks = recommendations.flat();
+            const uniqueTracks = Array.from(
+              new Map(allTracks.map(track => [track.spotifyUrl, track]))
+              .values()
+            ).slice(0, 5);
 
+            sceneResults.playlist = uniqueTracks;
             setSceneData(sceneResults);
+            
             if (!selectedImage) {
               setTextInput('');
             }
@@ -524,10 +533,40 @@ export default function SceneAnalyzer() {
             placeholder="Enter text description here..."
           />
 
-          <button onClick={analyzeImage} className={styles.analyzeButton}>
-            Analyze
+          <button 
+            onClick={analyzeImage} 
+            className={styles.analyzeButton}
+            disabled={loading}
+          >
+            {loading ? 'Analyzing...' : 'Analyze'}
           </button>
+
+          {error && (
+            <div className={styles.error}>{error}</div>
+          )}
         </div>
+
+        {sceneData?.scenes && (
+          <div className={styles.scenesSection}>
+            <h2 className={styles.sectionTitle}>Detected Scenes</h2>
+            <div className={styles.scenesList}>
+              {sceneData.scenes.map((scene, index) => (
+                <div 
+                  key={index} 
+                  className={`${styles.sceneItem} ${styles[scene.source]}`}
+                >
+                  <span className={styles.sceneName}>{scene.scene}</span>
+                  <span className={styles.sceneProb}>
+                    {Math.round(scene.probability * 100)}%
+                  </span>
+                  <span className={styles.sceneSource}>
+                    {scene.source === 'text' ? '文本输入' : '图片分析'}
+                  </span>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
 
         {sceneData?.playlist && (
           <div className={styles.musicSection}>
@@ -548,6 +587,9 @@ export default function SceneAnalyzer() {
                   <div className={styles.trackInfo}>
                     <h3>{track.name}</h3>
                     <p>{track.artist}</p>
+                    <span className={`${styles.sourceTag} ${styles[track.sceneSource]}`}>
+                      {track.sceneSource === 'text' ? '文本匹配' : '图片匹配'}
+                    </span>
                     {previewError === track.name && (
                       <p className={styles.previewError}>Preview Unavailable</p>
                     )}
