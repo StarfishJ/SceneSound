@@ -140,46 +140,90 @@ export default function SceneAnalyzer() {
     setSceneData(null);
 
     try {
-      const formData = new FormData();
+      // 移除URL末尾可能的斜杠
+      const baseUrl = (process.env.NEXT_PUBLIC_BACKEND_URL || 'https://scenesound-backend.onrender.com').replace(/\/$/, '');
+      console.log('发送请求到:', `${baseUrl}/analyze`);
+
+      let response;
       
-      if (hasImage) {
-        formData.append('image', selectedImage);
-        console.log('添加图片到请求:', selectedImage.name);
-      }
-      
-      if (hasText) {
-        formData.append('text', textInput.trim());
-        console.log('添加文本到请求:', textInput.trim());
+      if (hasText && !hasImage) {
+        // 纯文本分析
+        response = await fetch(`${baseUrl}/analyze`, {
+          method: 'POST',
+          mode: 'cors',
+          headers: {
+            'Content-Type': 'application/json',
+            'Accept': 'application/json'
+          },
+          body: JSON.stringify({
+            text: textInput.trim()
+          })
+        });
+      } else {
+        // 图片分析（可能包含文本）
+        const formData = new FormData();
+        if (hasImage) {
+          formData.append('image', selectedImage);
+          console.log('添加图片到请求:', selectedImage.name, '大小:', selectedImage.size, 'bytes');
+        }
+        if (hasText) {
+          formData.append('text', textInput.trim());
+          console.log('添加文本到请求:', textInput.trim());
+        }
+        
+        response = await fetch(`${baseUrl}/analyze`, {
+          method: 'POST',
+          mode: 'cors',
+          headers: {
+            'Accept': 'application/json'
+          },
+          body: formData
+        });
       }
 
       // 记录分析类型
       console.log('分析类型:', hasImage && hasText ? '图片和文字结合' : (hasImage ? '仅图片' : '仅文字'));
-      
-      // 移除URL末尾可能的斜杠
-      const baseUrl = (process.env.NEXT_PUBLIC_BACKEND_URL || 'https://scenesound-backend.onrender.com').replace(/\/$/, '');
-      console.log('发送请求到:', `${baseUrl}/analyze`);
-      
-      const response = await fetch(`${baseUrl}/analyze`, {
-        method: 'POST',
-        mode: 'cors',
-        headers: {
-          'Accept': 'application/json'
-        },
-        body: formData
-      });
-
       console.log('响应状态:', response.status);
+
       if (!response.ok) {
         const errorText = await response.text();
         console.error('请求失败:', response.status, errorText);
-        throw new Error(`Request failed with status: ${response.status} - ${errorText}`);
+        
+        let errorMessage = '';
+        try {
+          const errorJson = JSON.parse(errorText);
+          errorMessage = errorJson.error || '未知错误';
+        } catch {
+          errorMessage = errorText;
+        }
+
+        switch (response.status) {
+          case 400:
+            errorMessage = '请求格式错误：' + errorMessage;
+            break;
+          case 502:
+            errorMessage = '服务器暂时无法处理请求。请稍后重试。';
+            break;
+          case 413:
+            errorMessage = '图片文件太大，请选择更小的图片。';
+            break;
+          case 415:
+            errorMessage = '不支持的文件类型，请选择jpg、png或gif格式的图片。';
+            break;
+          case 429:
+            errorMessage = '请求过于频繁，请稍后再试。';
+            break;
+          default:
+            errorMessage = `服务器错误 (${response.status}): ${errorMessage}`;
+        }
+        throw new Error(errorMessage);
       }
 
       const data = await response.json();
       console.log('返回数据：', data);
       
       if (!data.success && !data.scenes) {
-        throw new Error(data.error || 'Analysis failed');
+        throw new Error(data.error || '场景分析失败');
       }
 
       const sceneResults = {
