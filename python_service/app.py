@@ -242,6 +242,10 @@ def analyze():
         logger.info("开始处理分析请求")
         logger.info(f"请求头: {dict(request.headers)}")
         
+        # 初始化场景列表
+        scenes = []
+        start_time = time.time()
+        
         # 检查是否是JSON格式的纯文本请求
         if request.is_json:
             data = request.get_json()
@@ -257,23 +261,22 @@ def analyze():
             logger.info(f"收到文本：{text}")
             
             # 直接使用文本作为场景关键词
-            scenes = [{
+            scenes.append({
                 'scene': text,
                 'probability': 1.0,
                 'source': 'text'
-            }]
+            })
+            
+            total_time = time.time() - start_time
+            logger.info(f"文本处理完成，总时间: {total_time:.2f}秒")
             
             return jsonify({
                 'success': True,
                 'scenes': scenes,
                 'processing_time': {
-                    'total': 0
+                    'total': total_time
                 }
             })
-        
-        # 初始化场景列表
-        scenes = []
-        start_time = time.time()
         
         # 处理文本输入（如果有）
         text = request.form.get('text', '').strip()
