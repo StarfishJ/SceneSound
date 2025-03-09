@@ -245,6 +245,11 @@ export default function SceneAnalyzer() {
         const controller = new AbortController();
         const timeoutId = setTimeout(() => controller.abort(), 60000);
 
+        const commonHeaders = {
+          'Accept': 'application/json',
+          'Origin': 'https://scene-sound.vercel.app'
+        };
+
         try {
           if (hasText && !hasImage) {
             // 纯文本分析使用JSON格式
@@ -252,9 +257,10 @@ export default function SceneAnalyzer() {
             response = await fetch(`${baseUrl}/analyze/text`, {
               method: 'POST',
               mode: 'cors',
+              credentials: 'omit',
               headers: {
-                'Content-Type': 'application/json',
-                'Accept': 'application/json'
+                ...commonHeaders,
+                'Content-Type': 'application/json'
               },
               body: JSON.stringify({
                 text: textInput.trim()
@@ -282,9 +288,8 @@ export default function SceneAnalyzer() {
             response = await fetch(`${baseUrl}/analyze`, {
               method: 'POST',
               mode: 'cors',
-              headers: {
-                'Accept': 'application/json'
-              },
+              credentials: 'omit',
+              headers: commonHeaders,
               body: formData,
               signal: controller.signal
             });
@@ -354,6 +359,12 @@ export default function SceneAnalyzer() {
           clearTimeout(timeoutId);
         }
       } catch (err) {
+        if (err.name === 'TypeError' && err.message === 'Failed to fetch') {
+          console.error('CORS错误或网络问题:', err);
+          setError('无法连接到服务器，请检查网络连接或稍后重试');
+          break;
+        }
+        
         if (retryCount === maxRetries) {
           console.error('分析错误:', err);
           setError(err.message || '处理过程中出错');
