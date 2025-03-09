@@ -7,6 +7,7 @@ import logging
 from dotenv import load_dotenv
 import io
 import gc
+import time
 
 # 配置日志
 logging.basicConfig(level=logging.DEBUG)
@@ -68,6 +69,7 @@ HTML_TEMPLATE = '''
         #result { margin-top: 20px; white-space: pre-wrap; }
         .loading { display: none; color: #666; }
         .error { color: red; }
+        .status { margin-top: 10px; color: #666; }
     </style>
 </head>
 <body>
@@ -79,6 +81,7 @@ HTML_TEMPLATE = '''
         </div>
         <button type="submit">分析</button>
         <div id="loading" class="loading">处理中，请稍候...</div>
+        <div id="status" class="status"></div>
     </form>
     <div id="result"></div>
 
@@ -87,6 +90,22 @@ HTML_TEMPLATE = '''
         const loading = document.getElementById('loading');
         const result = document.getElementById('result');
         const imageInput = document.getElementById('image');
+        const status = document.getElementById('status');
+
+        // 检查服务器状态
+        async function checkHealth() {
+            try {
+                const response = await fetch('/health');
+                const data = await response.json();
+                status.textContent = `服务器状态: ${data.status}`;
+            } catch (error) {
+                status.textContent = `服务器状态检查失败: ${error.message}`;
+            }
+        }
+
+        // 定期检查服务器状态
+        checkHealth();
+        setInterval(checkHealth, 30000);
 
         imageInput.onchange = function() {
             const file = this.files[0];
@@ -101,6 +120,8 @@ HTML_TEMPLATE = '''
                     this.value = '';
                     return;
                 }
+                // 显示图片信息
+                status.textContent = `已选择图片: ${file.name}, 大小: ${(file.size/1024).toFixed(2)}KB`;
             }
         };
 
@@ -117,22 +138,27 @@ HTML_TEMPLATE = '''
             formData.append('image', imageFile);
             loading.style.display = 'block';
             result.textContent = '';
+            status.textContent = '正在上传并处理图片...';
             
             try {
+                const startTime = Date.now();
                 const response = await fetch('/analyze', {
                     method: 'POST',
-                    headers: {
-                        'Accept': 'application/json'
-                    },
                     body: formData
                 });
+                const endTime = Date.now();
+                
                 if (!response.ok) {
-                    throw new Error(`请求失败: ${response.status}`);
+                    const errorText = await response.text();
+                    throw new Error(`请求失败: ${response.status} - ${errorText}`);
                 }
+                
                 const data = await response.json();
                 result.textContent = JSON.stringify(data, null, 2);
+                status.textContent = `处理完成，耗时: ${(endTime - startTime)/1000}秒`;
             } catch (error) {
                 result.innerHTML = `<div class="error">错误：${error.message}</div>`;
+                status.textContent = '处理失败';
             } finally {
                 loading.style.display = 'none';
             }
@@ -210,82 +236,61 @@ def process_image(image_file):
 
 @app.route('/analyze', methods=['POST'])
 def analyze_image():
+    """处理图片分析请求"""
     image = None
+    start_time = time.time()
+    
     try:
-        scenes = []
+        logger.info("开始处理分析请求")
+        logger.info(f"请求头: {dict(request.headers)}")
         
-        # 处理图片输入
-        if 'image' in request.files:
-            image_file = request.files['image']
-            if not image_file.filename:
-                logger.warning("收到空的图片文件")
-                return jsonify({'error': 'Empty image file'}), 400
-                
-            logger.info(f"收到图片：{image_file.filename}")
-            try:
-                # 处理和压缩图片
-                image = process_image(image_file)
-                logger.info(f"图片处理完成，尺寸: {image.size}")
-                
-                # 预测场景
-                image_scenes = model.predict(image=image)
-                scenes.extend(image_scenes)
-                logger.info(f"图片分析结果：{image_scenes}")
-                
-            except ValueError as ve:
-                logger.error(f"图片验证错误：{str(ve)}")
-                return jsonify({'error': str(ve)}), 400
-            except Exception as e:
-                logger.error(
-                    f"处理图片时出错：{str(e)}", 
-                    exc_info=True
-                )
-                return jsonify(
-                    {'error': f'Image processing error: {str(e)}'}
-                ), 400
-            finally:
-                # 清理图片对象
-                if image:
-                    image.close()
-                    del image
-                    gc.collect()
+        if 'image' not in request.files:
+            logger.error("请求中没有图片文件")
+            return jsonify({'error': 'No image file in request'}), 400
             
-        # 处理文字输入
-        if request.form.get('text'):
-            text = request.form.get('text').strip()
-            if not text:
-                logger.warning("收到空的文本输入")
-                return jsonify({'error': 'Empty text input'}), 400
-                
-            logger.info(f"收到文字：{text}")
-            keywords = text.lower().split()
-            for keyword in keywords:
-                text_scene = {
-                    'scene': keyword,
-                    'probability': 0.95
+        image_file = request.files['image']
+        if not image_file.filename:
+            logger.error("文件名为空")
+            return jsonify({'error': 'Empty filename'}), 400
+            
+        logger.info(f"收到图片：{image_file.filename}")
+        
+        try:
+            # 处理和压缩图片
+            image = process_image(image_file)
+            process_time = time.time() - start_time
+            logger.info(f"图片处理完成，尺寸: {image.size}，处理时间: {process_time:.2f}秒")
+            
+            # 预测场景
+            predict_start = time.time()
+            image_scenes = model.predict(image=image)
+            predict_time = time.time() - predict_start
+            logger.info(f"场景预测完成，耗时: {predict_time:.2f}秒")
+            
+            total_time = time.time() - start_time
+            logger.info(f"总处理时间: {total_time:.2f}秒")
+            
+            return jsonify({
+                'success': True,
+                'scenes': image_scenes,
+                'processing_time': {
+                    'image_processing': process_time,
+                    'prediction': predict_time,
+                    'total': total_time
                 }
-                scenes.append(text_scene)
-            logger.info(f"文字分析结果：{scenes[-len(keywords):]}")
+            })
             
-        if not scenes:
-            logger.warning("没有提供有效的输入")
-            return jsonify({'error': 'No valid input provided'}), 400
-            
-        # 按概率排序并去重（基于场景名称）
-        unique_scenes = {}
-        for scene in scenes:
-            scene_name = scene['scene']
-            if scene_name not in unique_scenes or scene['probability'] > unique_scenes[scene_name]['probability']:
-                unique_scenes[scene_name] = scene
-                
-        scenes = sorted(unique_scenes.values(), key=lambda x: x['probability'], reverse=True)
-        logger.info(f"最终分析结果：{scenes}")
-            
-        return jsonify({
-            'success': True,
-            'scenes': scenes
-        })
-        
+        except ValueError as ve:
+            logger.error(f"图片验证错误：{str(ve)}")
+            return jsonify({'error': str(ve)}), 400
+        except Exception as e:
+            logger.error(f"处理图片时出错：{str(e)}", exc_info=True)
+            return jsonify({'error': f'Image processing error: {str(e)}'}), 500
+        finally:
+            if image:
+                image.close()
+                del image
+                gc.collect()
     except Exception as e:
         logger.error(f"处理请求时发生错误：{str(e)}", exc_info=True)
         return jsonify({
