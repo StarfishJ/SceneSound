@@ -237,12 +237,12 @@ def process_image(image_file):
 
 @app.route('/analyze', methods=['POST'])
 def analyze():
-    """处理分析请求，支持图片和文本"""
+    """处理分析请求，支持图片和文本，或两者组合"""
     try:
         logger.info("开始处理分析请求")
         logger.info(f"请求头: {dict(request.headers)}")
         
-        # 检查是否是JSON格式的文本请求
+        # 检查是否是JSON格式的纯文本请求
         if request.is_json:
             data = request.get_json()
             if not data or 'text' not in data:
@@ -256,78 +256,86 @@ def analyze():
                 
             logger.info(f"收到文本：{text}")
             
-            # 预测场景
-            start_time = time.time()
-            scenes = model.predict(text=text)
-            predict_time = time.time() - start_time
-            logger.info(f"文本场景预测完成，耗时: {predict_time:.2f}秒")
+            # 直接使用文本作为场景关键词
+            scenes = [{
+                'scene': text,
+                'probability': 1.0,
+                'source': 'text'
+            }]
             
             return jsonify({
                 'success': True,
                 'scenes': scenes,
                 'processing_time': {
-                    'prediction': predict_time,
-                    'total': predict_time
+                    'total': 0
                 }
             })
         
-        # 处理图片请求
-        if 'image' not in request.files:
-            logger.error("请求中没有图片文件")
-            return jsonify({'error': 'No image file in request'}), 400
-            
-        image_file = request.files['image']
-        if not image_file.filename:
-            logger.error("文件名为空")
-            return jsonify({'error': 'Empty filename'}), 400
-            
-        logger.info(f"收到图片：{image_file.filename}")
+        # 初始化场景列表
+        scenes = []
+        start_time = time.time()
         
-        # 获取可选的文本描述
+        # 处理文本输入（如果有）
         text = request.form.get('text', '').strip()
         if text:
-            logger.info(f"收到附加文本：{text}")
-        
-        try:
-            # 处理和压缩图片
-            start_time = time.time()
-            image = process_image(image_file)
-            process_time = time.time() - start_time
-            logger.info(f"图片处理完成，尺寸: {image.size}，处理时间: {process_time:.2f}秒")
-            
-            # 预测场景
-            predict_start = time.time()
-            if text:
-                scenes = model.predict(image=image, text=text)
-            else:
-                scenes = model.predict(image=image)
-            predict_time = time.time() - predict_start
-            logger.info(f"场景预测完成，耗时: {predict_time:.2f}秒")
-            
-            total_time = time.time() - start_time
-            logger.info(f"总处理时间: {total_time:.2f}秒")
-            
-            return jsonify({
-                'success': True,
-                'scenes': scenes,
-                'processing_time': {
-                    'image_processing': process_time,
-                    'prediction': predict_time,
-                    'total': total_time
-                }
+            logger.info(f"收到文本：{text}")
+            scenes.append({
+                'scene': text,
+                'probability': 1.0,
+                'source': 'text'
             })
-            
-        except ValueError as ve:
-            logger.error(f"图片验证错误：{str(ve)}")
-            return jsonify({'error': str(ve)}), 400
-        except Exception as e:
-            logger.error(f"处理图片时出错：{str(e)}", exc_info=True)
-            return jsonify({'error': f'Image processing error: {str(e)}'}), 500
-        finally:
-            if 'image' in locals():
-                image.close()
-                del image
-                gc.collect()
+        
+        # 处理图片请求（如果有）
+        if 'image' in request.files:
+            image_file = request.files['image']
+            if image_file.filename:
+                logger.info(f"收到图片：{image_file.filename}")
+                
+                try:
+                    # 处理和压缩图片
+                    image_start = time.time()
+                    image = process_image(image_file)
+                    process_time = time.time() - image_start
+                    logger.info(f"图片处理完成，尺寸: {image.size}，处理时间: {process_time:.2f}秒")
+                    
+                    # 预测场景
+                    predict_start = time.time()
+                    image_scenes = model.predict(image)
+                    predict_time = time.time() - predict_start
+                    logger.info(f"场景预测完成，耗时: {predict_time:.2f}秒")
+                    
+                    # 为图片分析结果添加来源标记
+                    for scene in image_scenes:
+                        scene['source'] = 'image'
+                    scenes.extend(image_scenes)
+                    
+                except ValueError as ve:
+                    logger.error(f"图片验证错误：{str(ve)}")
+                    return jsonify({'error': str(ve)}), 400
+                except Exception as e:
+                    logger.error(f"处理图片时出错：{str(e)}", exc_info=True)
+                    return jsonify({'error': f'Image processing error: {str(e)}'}), 500
+                finally:
+                    if 'image' in locals():
+                        image.close()
+                        del image
+                        gc.collect()
+        
+        # 如果既没有文本也没有图片，返回错误
+        if not scenes:
+            logger.error("请求中既没有文本也没有图片")
+            return jsonify({'error': 'No text or image in request'}), 400
+        
+        total_time = time.time() - start_time
+        logger.info(f"总处理时间: {total_time:.2f}秒")
+        
+        return jsonify({
+            'success': True,
+            'scenes': scenes,
+            'processing_time': {
+                'total': total_time
+            }
+        })
                 
     except Exception as e:
         logger.error(f"处理请求时发生错误：{str(e)}", exc_info=True)
