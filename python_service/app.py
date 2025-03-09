@@ -26,21 +26,22 @@ ALLOWED_ORIGINS = os.getenv(
 
 # 配置CORS
 CORS(
-    app, 
+    app,
     resources={
         r"/analyze": {
-            "origins": ALLOWED_ORIGINS.split(','),
-            "methods": ["POST", "OPTIONS"],
-            "allow_headers": ["Content-Type", "Accept"],
-            "max_age": 3600
+            "origins": ["https://scene-sound.vercel.app"],
+            "methods": ["POST", "OPTIONS", "GET"],
+            "allow_headers": ["Content-Type", "Accept", "Origin"],
+            "expose_headers": ["Content-Type", "Authorization"],
+            "max_age": 3600,
+            "supports_credentials": False
         },
         r"/health": {
             "origins": "*",
             "methods": ["GET"],
             "max_age": 3600
         }
-    },
-    supports_credentials=False
+    }
 )
 app.debug = True  # 启用调试模式
 
@@ -250,9 +251,19 @@ def process_image(image_file):
             image_file.close()
         raise
 
-@app.route('/analyze', methods=['POST'])
+@app.route('/analyze', methods=['POST', 'OPTIONS'])
 def analyze_image():
     """处理图片或文本分析请求"""
+    # 处理预检请求
+    if request.method == 'OPTIONS':
+        response = app.make_default_options_response()
+        origin = request.headers.get('Origin')
+        if origin == 'https://scene-sound.vercel.app':
+            response.headers['Access-Control-Allow-Origin'] = origin
+            response.headers['Access-Control-Allow-Methods'] = 'POST, OPTIONS'
+            response.headers['Access-Control-Allow-Headers'] = 'Content-Type, Accept, Origin'
+        return response
+
     image = None
     start_time = time.time()
     
@@ -347,16 +358,16 @@ def analyze_image():
 
 @app.after_request
 def after_request(response):
-    # 获取请求的路径
-    path = request.path
+    """添加CORS头"""
     origin = request.headers.get('Origin')
     
-    # 为不同的路径设置不同的 CORS 头
-    if path == '/analyze' and origin == 'https://scene-sound.vercel.app':
+    if origin == 'https://scene-sound.vercel.app':
         response.headers['Access-Control-Allow-Origin'] = origin
-        response.headers['Access-Control-Allow-Methods'] = 'POST, OPTIONS'
-        response.headers['Access-Control-Allow-Headers'] = 'Content-Type, Accept'
-    elif path == '/health':
+        response.headers['Access-Control-Allow-Methods'] = 'POST, GET, OPTIONS'
+        response.headers['Access-Control-Allow-Headers'] = 'Content-Type, Accept, Origin'
+        response.headers['Access-Control-Max-Age'] = '3600'
+        response.headers['Access-Control-Allow-Credentials'] = 'false'
+    elif request.path == '/health':
         response.headers['Access-Control-Allow-Origin'] = '*'
         response.headers['Access-Control-Allow-Methods'] = 'GET'
     
