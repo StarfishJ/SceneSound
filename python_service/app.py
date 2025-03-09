@@ -203,9 +203,11 @@ def process_image(image_file):
                 'Unsupported image format. Please use JPEG, PNG or WebP'
             )
             
-        # 转换为RGB模式（如果需要）
+        # 转换为RGB模式（如果需要）并立即释放原始图像
         if image.mode != 'RGB':
-            image = image.convert('RGB')
+            new_image = image.convert('RGB')
+            image.close()
+            image = new_image
             
         # 如果图片太大，进行缩放
         if (image.size[0] > MAX_IMAGE_SIZE[0] or 
@@ -219,7 +221,10 @@ def process_image(image_file):
                 int(image.size[0] * ratio),
                 int(image.size[1] * ratio)
             )
-            image = image.resize(new_size, Image.Resampling.LANCZOS)
+            # 缩放并立即释放原始图像
+            new_image = image.resize(new_size, Image.Resampling.LANCZOS)
+            image.close()
+            image = new_image
             
         # 强制加载图片数据到内存并释放文件句柄
         image.load()
@@ -231,13 +236,17 @@ def process_image(image_file):
         return image
     except Exception as e:
         logger.error(f"处理图片时出错: {str(e)}")
-        if image_file:
+        if image_file and not image_file.closed:
             image_file.close()
+        if 'image' in locals():
+            image.close()
+        gc.collect()
         raise
 
 @app.route('/analyze', methods=['POST'])
 def analyze():
     """处理分析请求，支持图片和文本，或两者组合"""
+    image = None
     try:
         logger.info("开始处理分析请求")
         logger.info(f"请求头: {dict(request.headers)}")
@@ -319,10 +328,10 @@ def analyze():
                     logger.error(f"处理图片时出错：{str(e)}", exc_info=True)
                     return jsonify({'error': f'Image processing error: {str(e)}'}), 500
                 finally:
-                    if 'image' in locals():
+                    if image:
                         image.close()
                         del image
-                        gc.collect()
+                    gc.collect()
         
         # 如果既没有文本也没有图片，返回错误
         if not scenes:
@@ -342,6 +351,10 @@ def analyze():
                 
     except Exception as e:
         logger.error(f"处理请求时发生错误：{str(e)}", exc_info=True)
+        if image:
+            image.close()
+            del image
+        gc.collect()
         return jsonify({
             'success': False,
             'error': str(e)
