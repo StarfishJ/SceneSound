@@ -359,6 +359,10 @@ def after_request(response):
             'Access-Control-Max-Age': '3600',
             'Vary': 'Origin'
         })
+        
+        # 对于预检请求，返回200状态码
+        if request.method == 'OPTIONS':
+            return response
     elif request.path == '/health':
         response.headers.update({
             'Access-Control-Allow-Origin': '*',
