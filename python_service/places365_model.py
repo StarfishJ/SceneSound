@@ -22,9 +22,7 @@ class Places365Model:
         }
         
         # 设置设备
-        self.device = torch.device(
-            'cuda' if torch.cuda.is_available() else 'cpu'
-        )
+        self.device = torch.device('cpu')  # 强制使用CPU以避免CUDA内存问题
         
         # 初始化模型
         self.model = models.resnet18(weights=None)
@@ -40,18 +38,19 @@ class Places365Model:
             with open(weights_path, 'wb') as f:
                 f.write(response.content)
         
-        # 加载权重到模型
-        checkpoint = torch.load(weights_path, map_location=self.device)
+        # 优化权重加载过程
+        checkpoint = torch.load(weights_path, map_location='cpu')
         state_dict = {str.replace(k, 'module.', ''): v 
                      for k, v in checkpoint['state_dict'].items()}
         self.model.load_state_dict(state_dict)
-        self.model.to(self.device)
-        self.model.eval()
+        del checkpoint  # 立即释放checkpoint内存
+        torch.cuda.empty_cache() if torch.cuda.is_available() else None
         
-        # 图像预处理
+        self.model.eval()  # 设置为评估模式
+        
+        # 优化图像预处理
         self.preprocess = transforms.Compose([
-            transforms.Resize(256),
-            transforms.CenterCrop(224),
+            transforms.Resize((224, 224)),  # 直接调整到目标大小
             transforms.ToTensor(),
             transforms.Normalize(
                 mean=[0.485, 0.456, 0.406],
@@ -98,7 +97,7 @@ class Places365Model:
             else:
                 raise ValueError("不支持的图片格式")
 
-            # 预处理图像
+            # 预处理图像并确保释放内存
             input_tensor = self.preprocess(img)
             input_batch = input_tensor.unsqueeze(0)
             
@@ -117,6 +116,10 @@ class Places365Model:
                     'scene': self.places365_labels[idx],
                     'probability': float(prob)
                 })
+            
+            # 清理内存
+            del input_tensor, input_batch, output, probabilities
+            torch.cuda.empty_cache() if torch.cuda.is_available() else None
             
             return predictions
             
