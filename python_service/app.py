@@ -31,15 +31,7 @@ CORS(
         r"/analyze": {
             "origins": ALLOWED_ORIGINS.split(','),
             "methods": ["POST", "OPTIONS"],
-            "allow_headers": ["Content-Type", "Accept", "Origin"],
-            "expose_headers": ["Content-Type"],
-            "max_age": 3600
-        },
-        r"/analyze/text": {
-            "origins": ALLOWED_ORIGINS.split(','),
-            "methods": ["POST", "OPTIONS"],
-            "allow_headers": ["Content-Type", "Accept", "Origin"],
-            "expose_headers": ["Content-Type"],
+            "allow_headers": ["Content-Type", "Accept"],
             "max_age": 3600
         },
         r"/health": {
@@ -243,15 +235,42 @@ def process_image(image_file):
         raise
 
 @app.route('/analyze', methods=['POST'])
-def analyze_image():
-    """处理图片分析请求"""
-    image = None
-    start_time = time.time()
-    
+def analyze():
+    """处理分析请求，支持图片和文本"""
     try:
         logger.info("开始处理分析请求")
         logger.info(f"请求头: {dict(request.headers)}")
         
+        # 检查是否是JSON格式的文本请求
+        if request.is_json:
+            data = request.get_json()
+            if not data or 'text' not in data:
+                logger.error("JSON请求中没有文本内容")
+                return jsonify({'error': 'No text in request'}), 400
+                
+            text = data['text'].strip()
+            if not text:
+                logger.error("文本内容为空")
+                return jsonify({'error': 'Empty text'}), 400
+                
+            logger.info(f"收到文本：{text}")
+            
+            # 预测场景
+            start_time = time.time()
+            scenes = model.predict(text=text)
+            predict_time = time.time() - start_time
+            logger.info(f"文本场景预测完成，耗时: {predict_time:.2f}秒")
+            
+            return jsonify({
+                'success': True,
+                'scenes': scenes,
+                'processing_time': {
+                    'prediction': predict_time,
+                    'total': predict_time
+                }
+            })
+        
+        # 处理图片请求
         if 'image' not in request.files:
             logger.error("请求中没有图片文件")
             return jsonify({'error': 'No image file in request'}), 400
@@ -263,15 +282,24 @@ def analyze_image():
             
         logger.info(f"收到图片：{image_file.filename}")
         
+        # 获取可选的文本描述
+        text = request.form.get('text', '').strip()
+        if text:
+            logger.info(f"收到附加文本：{text}")
+        
         try:
             # 处理和压缩图片
+            start_time = time.time()
             image = process_image(image_file)
             process_time = time.time() - start_time
             logger.info(f"图片处理完成，尺寸: {image.size}，处理时间: {process_time:.2f}秒")
             
             # 预测场景
             predict_start = time.time()
-            image_scenes = model.predict(image=image)
+            if text:
+                scenes = model.predict(image=image, text=text)
+            else:
+                scenes = model.predict(image=image)
             predict_time = time.time() - predict_start
             logger.info(f"场景预测完成，耗时: {predict_time:.2f}秒")
             
@@ -280,7 +308,7 @@ def analyze_image():
             
             return jsonify({
                 'success': True,
-                'scenes': image_scenes,
+                'scenes': scenes,
                 'processing_time': {
                     'image_processing': process_time,
                     'prediction': predict_time,
@@ -295,57 +323,13 @@ def analyze_image():
             logger.error(f"处理图片时出错：{str(e)}", exc_info=True)
             return jsonify({'error': f'Image processing error: {str(e)}'}), 500
         finally:
-            if image:
+            if 'image' in locals():
                 image.close()
                 del image
                 gc.collect()
+                
     except Exception as e:
         logger.error(f"处理请求时发生错误：{str(e)}", exc_info=True)
-        return jsonify({
-            'success': False,
-            'error': str(e)
-        }), 500
-
-@app.route('/analyze/text', methods=['POST', 'OPTIONS'])
-def analyze_text():
-    """处理纯文本分析请求"""
-    try:
-        logger.info("开始处理文本分析请求")
-        logger.info(f"请求头: {dict(request.headers)}")
-        
-        if not request.is_json:
-            logger.error("请求不是JSON格式")
-            return jsonify({'error': 'Request must be JSON'}), 400
-            
-        data = request.get_json()
-        if not data or 'text' not in data:
-            logger.error("请求中没有文本内容")
-            return jsonify({'error': 'No text in request'}), 400
-            
-        text = data['text'].strip()
-        if not text:
-            logger.error("文本内容为空")
-            return jsonify({'error': 'Empty text'}), 400
-            
-        logger.info(f"收到文本：{text}")
-        
-        # 预测场景
-        start_time = time.time()
-        text_scenes = model.predict(text=text)
-        predict_time = time.time() - start_time
-        logger.info(f"场景预测完成，耗时: {predict_time:.2f}秒")
-        
-        return jsonify({
-            'success': True,
-            'scenes': text_scenes,
-            'processing_time': {
-                'prediction': predict_time,
-                'total': predict_time
-            }
-        })
-            
-    except Exception as e:
-        logger.error(f"处理文本分析请求时发生错误：{str(e)}", exc_info=True)
         return jsonify({
             'success': False,
             'error': str(e)
@@ -354,30 +338,21 @@ def analyze_text():
 @app.after_request
 def after_request(response):
     # 获取请求的路径和来源
-    path = request.path
     origin = request.headers.get('Origin')
     
     # 为不同的路径设置不同的 CORS 头
-    if path in ['/analyze', '/analyze/text'] and origin in ALLOWED_ORIGINS.split(','):
+    if origin in ALLOWED_ORIGINS.split(','):
         response.headers.update({
             'Access-Control-Allow-Origin': origin,
             'Access-Control-Allow-Methods': 'POST, OPTIONS',
-            'Access-Control-Allow-Headers': 'Content-Type, Accept, Origin',
-            'Access-Control-Expose-Headers': 'Content-Type',
+            'Access-Control-Allow-Headers': 'Content-Type, Accept',
             'Access-Control-Max-Age': '3600'
         })
-    elif path == '/health':
+    elif request.path == '/health':
         response.headers.update({
             'Access-Control-Allow-Origin': '*',
             'Access-Control-Allow-Methods': 'GET'
         })
-    
-    # 添加缓存控制头
-    response.headers.update({
-        'Cache-Control': 'no-cache, no-store, must-revalidate',
-        'Pragma': 'no-cache',
-        'Expires': '0'
-    })
     
     return response
 

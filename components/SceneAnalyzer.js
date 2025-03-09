@@ -239,58 +239,47 @@ export default function SceneAnalyzer() {
     while (retryCount <= maxRetries) {
       try {
         const baseUrl = (process.env.NEXT_PUBLIC_BACKEND_URL || 'https://scenesound-backend.onrender.com').replace(/\/$/, '');
-        console.log('发送请求到:', `${baseUrl}/analyze`, '重试次数:', retryCount);
-
+        
         let response;
         const controller = new AbortController();
         const timeoutId = setTimeout(() => controller.abort(), 60000);
 
-        const commonHeaders = {
-          'Accept': 'application/json',
-          'Origin': 'https://scene-sound.vercel.app'
-        };
-
         try {
-          if (hasText && !hasImage) {
-            // 纯文本分析使用JSON格式
-            console.log('发送纯文本分析请求');
-            response = await fetch(`${baseUrl}/analyze/text`, {
-              method: 'POST',
-              mode: 'cors',
-              credentials: 'omit',
-              headers: {
-                ...commonHeaders,
-                'Content-Type': 'application/json'
-              },
-              body: JSON.stringify({
-                text: textInput.trim()
-              }),
-              signal: controller.signal
-            });
-          } else {
+          if (hasImage) {
             // 图片分析（可能包含文本）使用FormData格式
             const formData = new FormData();
-            if (hasImage) {
-              // 确保图片大小合适
-              let imageToSend = selectedImage;
-              if (selectedImage.size > MAX_FILE_SIZE) {
-                console.log('压缩图片以优化上传...');
-                imageToSend = await compressImage(selectedImage);
-              }
-              formData.append('image', imageToSend);
-              console.log('添加图片到请求:', imageToSend.name, '大小:', imageToSend.size, 'bytes');
+            
+            // 确保图片大小合适
+            let imageToSend = selectedImage;
+            if (selectedImage.size > MAX_FILE_SIZE) {
+              console.log('压缩图片以优化上传...');
+              imageToSend = await compressImage(selectedImage);
             }
+            formData.append('image', imageToSend);
+            console.log('添加图片到请求:', imageToSend.name, '大小:', imageToSend.size, 'bytes');
+            
             if (hasText) {
               formData.append('text', textInput.trim());
               console.log('添加文本到请求:', textInput.trim());
             }
 
+            console.log('发送图片分析请求');
             response = await fetch(`${baseUrl}/analyze`, {
               method: 'POST',
-              mode: 'cors',
-              credentials: 'omit',
-              headers: commonHeaders,
               body: formData,
+              signal: controller.signal
+            });
+          } else {
+            // 纯文本分析使用JSON格式
+            console.log('发送纯文本分析请求');
+            response = await fetch(`${baseUrl}/analyze`, {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json'
+              },
+              body: JSON.stringify({
+                text: textInput.trim()
+              }),
               signal: controller.signal
             });
           }
