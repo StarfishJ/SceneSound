@@ -31,7 +31,9 @@ CORS(
         r"/analyze": {
             "origins": ALLOWED_ORIGINS.split(','),
             "methods": ["POST", "OPTIONS"],
-            "allow_headers": ["Content-Type", "Accept"],
+            "allow_headers": ["Content-Type", "Accept", "Origin"],
+            "expose_headers": ["Content-Type"],
+            "supports_credentials": False,
             "max_age": 3600
         },
         r"/health": {
@@ -39,8 +41,7 @@ CORS(
             "methods": ["GET"],
             "max_age": 3600
         }
-    },
-    supports_credentials=False
+    }
 )
 app.debug = True  # 启用调试模式
 
@@ -337,22 +338,31 @@ def analyze():
 
 @app.after_request
 def after_request(response):
-    # 获取请求的路径和来源
+    """处理CORS响应头"""
     origin = request.headers.get('Origin')
     
-    # 为不同的路径设置不同的 CORS 头
     if origin in ALLOWED_ORIGINS.split(','):
+        # 设置CORS响应头
         response.headers.update({
             'Access-Control-Allow-Origin': origin,
             'Access-Control-Allow-Methods': 'POST, OPTIONS',
-            'Access-Control-Allow-Headers': 'Content-Type, Accept',
-            'Access-Control-Max-Age': '3600'
+            'Access-Control-Allow-Headers': 'Content-Type, Accept, Origin',
+            'Access-Control-Expose-Headers': 'Content-Type',
+            'Access-Control-Max-Age': '3600',
+            'Vary': 'Origin'
         })
     elif request.path == '/health':
         response.headers.update({
             'Access-Control-Allow-Origin': '*',
             'Access-Control-Allow-Methods': 'GET'
         })
+    
+    # 添加缓存控制头
+    response.headers.update({
+        'Cache-Control': 'no-cache, no-store, must-revalidate',
+        'Pragma': 'no-cache',
+        'Expires': '0'
+    })
     
     return response
 
