@@ -17,37 +17,132 @@ export default function SceneAnalyzer() {
   const [previewError, setPreviewError] = useState(null);
   const [isMobile, setIsMobile] = useState(false);
 
-  const handleImageSelect = (e) => {
+  const MAX_IMAGE_SIZE = 600;
+  const MAX_FILE_SIZE = 2 * 1024 * 1024; // 降低到2MB
+  const COMPRESSION_QUALITY = 0.6; // 提高压缩率
+
+  const compressImage = async (file, maxDimension = MAX_IMAGE_SIZE, quality = COMPRESSION_QUALITY) => {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        const img = new Image();
+        img.onload = () => {
+          // 计算新的尺寸，保持宽高比
+          let { width, height } = img;
+          const maxSize = Math.max(width, height);
+          if (maxSize > maxDimension) {
+            const ratio = maxDimension / maxSize;
+            width = Math.floor(width * ratio);
+            height = Math.floor(height * ratio);
+          }
+
+          // 创建canvas进行压缩
+          const canvas = document.createElement('canvas');
+          canvas.width = width;
+          canvas.height = height;
+          const ctx = canvas.getContext('2d');
+          
+          // 使用双线性插值算法进行缩放
+          ctx.imageSmoothingEnabled = true;
+          ctx.imageSmoothingQuality = 'high';
+          ctx.drawImage(img, 0, 0, width, height);
+
+          // 转换为blob，使用渐进式JPEG
+          canvas.toBlob(
+            (blob) => {
+              if (!blob) {
+                reject(new Error('图片压缩失败'));
+                return;
+              }
+              console.log('原始图片大小:', file.size, 'bytes');
+              console.log('压缩后的图片大小:', blob.size, 'bytes');
+              console.log('压缩率:', Math.round((1 - blob.size / file.size) * 100) + '%');
+              
+              // 如果压缩后仍然太大，继续压缩
+              if (blob.size > MAX_FILE_SIZE) {
+                console.log('尝试进一步压缩...');
+                const newQuality = quality * 0.8;
+                canvas.toBlob(
+                  (finalBlob) => {
+                    if (!finalBlob) {
+                      reject(new Error('图片二次压缩失败'));
+                      return;
+                    }
+                    console.log('二次压缩后大小:', finalBlob.size, 'bytes');
+                    resolve(new File([finalBlob], file.name.replace(/\.[^/.]+$/, '.jpg'), {
+                      type: 'image/jpeg',
+                      lastModified: Date.now()
+                    }));
+                  },
+                  'image/jpeg',
+                  newQuality
+                );
+              } else {
+                resolve(new File([blob], file.name.replace(/\.[^/.]+$/, '.jpg'), {
+                  type: 'image/jpeg',
+                  lastModified: Date.now()
+                }));
+              }
+            },
+            'image/jpeg',
+            quality
+          );
+        };
+        img.onerror = () => reject(new Error('图片加载失败'));
+        img.src = e.target.result;
+      };
+      reader.onerror = () => reject(new Error('文件读取失败'));
+      reader.readAsDataURL(file);
+    });
+  };
+
+  const handleImageSelect = async (e) => {
     const file = e.target.files[0];
     if (!file) return;
 
-    if (!file.type.startsWith('image/')) {
-      setError('Please select an image file');
-      return;
-    }
+    try {
+      setError('');
+      setLoading(true);
 
-    if (file.size > 5 * 1024 * 1024) {
-      setError('Image size cannot exceed 5MB');
-      return;
-    }
+      if (!file.type.startsWith('image/')) {
+        throw new Error('请选择图片文件');
+      }
 
-    // 创建图片预览
-    const reader = new FileReader();
-    reader.onload = () => {
-      // 创建图片元素来检查尺寸
-      const img = new Image();
-      img.onload = () => {
-        // 如果图片太大，显示警告
-        if (img.width > 800 || img.height > 800) {
-          console.log('图片将被自动调整大小以优化性能');
+      if (file.size > MAX_FILE_SIZE * 3) {
+        throw new Error('图片大小不能超过6MB');
+      }
+
+      // 处理图片
+      let processedFile = file;
+      if (file.size > MAX_FILE_SIZE || file.type !== 'image/jpeg') {
+        console.log('正在压缩图片...');
+        processedFile = await compressImage(file);
+        
+        if (processedFile.size > MAX_FILE_SIZE) {
+          console.log('图片仍然太大，进行二次压缩...');
+          processedFile = await compressImage(processedFile, MAX_IMAGE_SIZE * 0.8, 0.5);
         }
-        setImagePreview(reader.result);
+      }
+
+      // 创建预览
+      const reader = new FileReader();
+      reader.onload = () => {
+        const img = new Image();
+        img.onload = () => {
+          console.log('最终图片尺寸:', img.width, 'x', img.height);
+          console.log('最终文件大小:', processedFile.size, 'bytes');
+          setImagePreview(reader.result);
+        };
+        img.src = reader.result;
       };
-      img.src = reader.result;
-    };
-    reader.readAsDataURL(file);
-    setSelectedImage(file);
-    setError('');
+      reader.readAsDataURL(processedFile);
+      setSelectedImage(processedFile);
+    } catch (err) {
+      console.error('处理图片时出错:', err);
+      setError(err.message || '处理图片时出错，请重试');
+    } finally {
+      setLoading(false);
+    }
   };
 
   const handleDrop = (e) => {
@@ -126,7 +221,6 @@ export default function SceneAnalyzer() {
   };
 
   const analyzeImage = async () => {
-    // 检查输入情况
     const hasImage = !!selectedImage;
     const hasText = !!textInput.trim();
 
@@ -139,122 +233,157 @@ export default function SceneAnalyzer() {
     setError('');
     setSceneData(null);
 
-    try {
-      // 移除URL末尾可能的斜杠
-      const baseUrl = (process.env.NEXT_PUBLIC_BACKEND_URL || 'https://scenesound-backend.onrender.com').replace(/\/$/, '');
-      console.log('发送请求到:', `${baseUrl}/analyze`);
+    const maxRetries = 2;
+    let retryCount = 0;
 
-      let response;
-      
-      if (hasText && !hasImage) {
-        // 纯文本分析
-        response = await fetch(`${baseUrl}/analyze`, {
-          method: 'POST',
-          mode: 'cors',
-          headers: {
-            'Content-Type': 'application/json',
-            'Accept': 'application/json'
-          },
-          body: JSON.stringify({
-            text: textInput.trim()
-          })
-        });
-      } else {
-        // 图片分析（可能包含文本）
-        const formData = new FormData();
-        if (hasImage) {
-          formData.append('image', selectedImage);
-          console.log('添加图片到请求:', selectedImage.name, '大小:', selectedImage.size, 'bytes');
-        }
-        if (hasText) {
-          formData.append('text', textInput.trim());
-          console.log('添加文本到请求:', textInput.trim());
-        }
-        
-        response = await fetch(`${baseUrl}/analyze`, {
-          method: 'POST',
-          mode: 'cors',
-          headers: {
-            'Accept': 'application/json'
-          },
-          body: formData
-        });
-      }
+    while (retryCount <= maxRetries) {
+      try {
+        const baseUrl = (process.env.NEXT_PUBLIC_BACKEND_URL || 'https://scenesound-backend.onrender.com').replace(/\/$/, '');
+        console.log('发送请求到:', `${baseUrl}/analyze`, '重试次数:', retryCount);
 
-      // 记录分析类型
-      console.log('分析类型:', hasImage && hasText ? '图片和文字结合' : (hasImage ? '仅图片' : '仅文字'));
-      console.log('响应状态:', response.status);
+        let response;
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 60000);
 
-      if (!response.ok) {
-        const errorText = await response.text();
-        console.error('请求失败:', response.status, errorText);
-        
-        let errorMessage = '';
         try {
-          const errorJson = JSON.parse(errorText);
-          errorMessage = errorJson.error || '未知错误';
-        } catch {
-          errorMessage = errorText;
+          if (hasText && !hasImage) {
+            // 纯文本分析使用JSON格式
+            console.log('发送纯文本分析请求');
+            response = await fetch(`${baseUrl}/analyze/text`, {
+              method: 'POST',
+              mode: 'cors',
+              headers: {
+                'Content-Type': 'application/json',
+                'Accept': 'application/json'
+              },
+              body: JSON.stringify({
+                text: textInput.trim()
+              }),
+              signal: controller.signal
+            });
+          } else {
+            // 图片分析（可能包含文本）使用FormData格式
+            const formData = new FormData();
+            if (hasImage) {
+              // 确保图片大小合适
+              let imageToSend = selectedImage;
+              if (selectedImage.size > MAX_FILE_SIZE) {
+                console.log('压缩图片以优化上传...');
+                imageToSend = await compressImage(selectedImage);
+              }
+              formData.append('image', imageToSend);
+              console.log('添加图片到请求:', imageToSend.name, '大小:', imageToSend.size, 'bytes');
+            }
+            if (hasText) {
+              formData.append('text', textInput.trim());
+              console.log('添加文本到请求:', textInput.trim());
+            }
+
+            response = await fetch(`${baseUrl}/analyze`, {
+              method: 'POST',
+              mode: 'cors',
+              headers: {
+                'Accept': 'application/json'
+              },
+              body: formData,
+              signal: controller.signal
+            });
+          }
+
+          clearTimeout(timeoutId);
+          
+          console.log('响应状态:', response.status);
+          
+          if (response.ok) {
+            const data = await response.json();
+            console.log('返回数据：', data);
+            
+            if (!data.success && !data.scenes) {
+              throw new Error(data.error || '场景分析失败');
+            }
+
+            const sceneResults = {
+              scenes: data.scenes || [],
+              playlist: []
+            };
+
+            // 获取音乐推荐
+            const recommendations = await Promise.all(
+              sceneResults.scenes.map(async (scene) => {
+                const tracks = await getSpotifyRecommendations(scene.scene);
+                return tracks || [];
+              })
+            );
+
+            sceneResults.playlist = Array.from(new Set(recommendations.flat()))
+              .slice(0, 5);
+
+            setSceneData(sceneResults);
+            if (!selectedImage) {
+              setTextInput('');
+            }
+            setRecommendedMusic(sceneResults.playlist);
+            return; // 成功后退出
+          }
+
+          // 处理错误响应
+          const errorText = await response.text();
+          console.error('请求失败:', response.status, errorText);
+          
+          let errorMessage = '';
+          try {
+            const errorJson = JSON.parse(errorText);
+            errorMessage = errorJson.error || '未知错误';
+          } catch {
+            errorMessage = errorText;
+          }
+
+          // 判断是否需要重试
+          if (response.status === 502 || response.status === 504) {
+            if (retryCount < maxRetries) {
+              retryCount++;
+              console.log(`服务器暂时无响应，${retryCount}秒后重试...`);
+              await new Promise(resolve => setTimeout(resolve, retryCount * 1000));
+              continue;
+            }
+          }
+
+          // 其他错误直接抛出
+          throw new Error(getErrorMessage(response.status, errorMessage));
+        } finally {
+          clearTimeout(timeoutId);
         }
-
-        switch (response.status) {
-          case 400:
-            errorMessage = '请求格式错误：' + errorMessage;
-            break;
-          case 502:
-            errorMessage = '服务器暂时无法处理请求。请稍后重试。';
-            break;
-          case 413:
-            errorMessage = '图片文件太大，请选择更小的图片。';
-            break;
-          case 415:
-            errorMessage = '不支持的文件类型，请选择jpg、png或gif格式的图片。';
-            break;
-          case 429:
-            errorMessage = '请求过于频繁，请稍后再试。';
-            break;
-          default:
-            errorMessage = `服务器错误 (${response.status}): ${errorMessage}`;
+      } catch (err) {
+        if (retryCount === maxRetries) {
+          console.error('分析错误:', err);
+          setError(err.message || '处理过程中出错');
+          break;
         }
-        throw new Error(errorMessage);
+        retryCount++;
+        console.log(`发生错误，${retryCount}秒后重试...`);
+        await new Promise(resolve => setTimeout(resolve, retryCount * 1000));
       }
+    }
 
-      const data = await response.json();
-      console.log('返回数据：', data);
-      
-      if (!data.success && !data.scenes) {
-        throw new Error(data.error || '场景分析失败');
-      }
+    setLoading(false);
+  };
 
-      const sceneResults = {
-        scenes: data.scenes || [],
-        playlist: []
-      };
-
-      // 获取每个场景的音乐推荐
-      const recommendations = await Promise.all(
-        sceneResults.scenes.map(async (scene) => {
-          const tracks = await getSpotifyRecommendations(scene.scene);
-          return tracks || [];
-        })
-      );
-
-      // 合并所有推荐并去重
-      sceneResults.playlist = Array.from(new Set(recommendations.flat()))
-        .slice(0, 5);
-
-      setSceneData(sceneResults);
-      // 只有在没有图片输入时才清空文本
-      if (!selectedImage) {
-        setTextInput('');
-      }
-
-      setRecommendedMusic(sceneResults.playlist);
-    } catch (err) {
-      console.error('分析错误:', err);
-      setError(err.message || '处理过程中出错');
-    } finally {
-      setLoading(false);
+  const getErrorMessage = (status, message) => {
+    switch (status) {
+      case 400:
+        return '请求格式错误：' + message;
+      case 502:
+        return '服务器暂时无法处理请求，正在重试...';
+      case 413:
+        return '图片文件太大，请选择更小的图片或等待自动压缩完成。';
+      case 415:
+        return '不支持的文件类型，请选择jpg、png或gif格式的图片。';
+      case 429:
+        return '请求过于频繁，请稍后再试。';
+      case 504:
+        return '服务器处理超时，正在重试...';
+      default:
+        return `服务器错误 (${status}): ${message}`;
     }
   };
 
