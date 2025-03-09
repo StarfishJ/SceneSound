@@ -233,157 +233,88 @@ export default function SceneAnalyzer() {
     setError('');
     setSceneData(null);
 
-    const maxRetries = 2;
-    let retryCount = 0;
-
-    while (retryCount <= maxRetries) {
-      try {
+    try {
+      let scenes = [];
+      
+      // 如果有文本输入，直接作为场景关键词
+      if (hasText) {
+        scenes.push({
+          scene: textInput.trim(),
+          probability: 1.0,
+          source: 'text'
+        });
+      }
+      
+      // 如果有图片，发送到后端分析
+      if (hasImage) {
         const baseUrl = (process.env.NEXT_PUBLIC_BACKEND_URL || 'https://scenesound-backend.onrender.com').replace(/\/$/, '');
+        const formData = new FormData();
         
-        let response;
-        const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 60000);
-
-        const commonConfig = {
+        let imageToSend = selectedImage;
+        if (selectedImage.size > MAX_FILE_SIZE) {
+          console.log('压缩图片以优化上传...');
+          imageToSend = await compressImage(selectedImage);
+        }
+        formData.append('image', imageToSend);
+        
+        const response = await fetch(`${baseUrl}/analyze`, {
           method: 'POST',
           mode: 'cors',
           credentials: 'omit',
-          headers: {
-            'Accept': 'application/json'
-          },
-          signal: controller.signal
-        };
-
-        try {
-          if (hasImage) {
-            // 图片分析（可能包含文本）使用FormData格式
-            const formData = new FormData();
-            
-            // 确保图片大小合适
-            let imageToSend = selectedImage;
-            if (selectedImage.size > MAX_FILE_SIZE) {
-              console.log('压缩图片以优化上传...');
-              imageToSend = await compressImage(selectedImage);
-            }
-            formData.append('image', imageToSend);
-            console.log('添加图片到请求:', imageToSend.name, '大小:', imageToSend.size, 'bytes');
-            
-            if (hasText) {
-              formData.append('text', textInput.trim());
-              console.log('添加文本到请求:', textInput.trim());
-            }
-
-            console.log('发送组合分析请求');
-            response = await fetch(`${baseUrl}/analyze`, {
-              ...commonConfig,
-              body: formData
-            });
-          } else {
-            // 纯文本分析使用JSON格式
-            console.log('发送纯文本分析请求');
-            response = await fetch(`${baseUrl}/analyze`, {
-              ...commonConfig,
-              headers: {
-                ...commonConfig.headers,
-                'Content-Type': 'application/json'
-              },
-              body: JSON.stringify({
-                text: textInput.trim()
-              })
-            });
-          }
-
-          clearTimeout(timeoutId);
-          
-          console.log('响应状态:', response.status);
-          
-          if (response.ok) {
-            const data = await response.json();
-            console.log('返回数据：', data);
-            
-            if (!data.success && !data.scenes) {
-              throw new Error(data.error || '场景分析失败');
-            }
-
-            const sceneResults = {
-              scenes: data.scenes || [],
-              playlist: []
-            };
-
-            // 获取音乐推荐
-            const recommendations = await Promise.all(
-              sceneResults.scenes.map(async (scene) => {
-                const tracks = await getSpotifyRecommendations(scene.scene);
-                return tracks ? tracks.map(track => ({
-                  ...track,
-                  sceneSource: scene.source // 添加场景来源到音乐信息中
-                })) : [];
-              })
-            );
-
-            // 合并所有推荐，并确保不重复
-            const allTracks = recommendations.flat();
-            const uniqueTracks = Array.from(
-              new Map(allTracks.map(track => [track.spotifyUrl, track]))
-              .values()
-            ).slice(0, 5);
-
-            sceneResults.playlist = uniqueTracks;
-            setSceneData(sceneResults);
-            
-            if (!selectedImage) {
-              setTextInput('');
-            }
-            setRecommendedMusic(sceneResults.playlist);
-            return; // 成功后退出
-          }
-
-          // 处理错误响应
-          const errorText = await response.text();
-          console.error('请求失败:', response.status, errorText);
-          
-          let errorMessage = '';
-          try {
-            const errorJson = JSON.parse(errorText);
-            errorMessage = errorJson.error || '未知错误';
-          } catch {
-            errorMessage = errorText;
-          }
-
-          // 判断是否需要重试
-          if (response.status === 502 || response.status === 504) {
-            if (retryCount < maxRetries) {
-              retryCount++;
-              console.log(`服务器暂时无响应，${retryCount}秒后重试...`);
-              await new Promise(resolve => setTimeout(resolve, retryCount * 1000));
-              continue;
-            }
-          }
-
-          // 其他错误直接抛出
-          throw new Error(getErrorMessage(response.status, errorMessage));
-        } finally {
-          clearTimeout(timeoutId);
-        }
-      } catch (err) {
-        if (err.name === 'TypeError' && err.message === 'Failed to fetch') {
-          console.error('CORS错误或网络问题:', err);
-          setError('无法连接到服务器，请检查网络连接或稍后重试');
-          break;
+          body: formData
+        });
+        
+        if (!response.ok) {
+          throw new Error(getErrorMessage(response.status, await response.text()));
         }
         
-        if (retryCount === maxRetries) {
-          console.error('分析错误:', err);
-          setError(err.message || '处理过程中出错');
-          break;
+        const data = await response.json();
+        if (!data.success) {
+          throw new Error(data.error || '场景分析失败');
         }
-        retryCount++;
-        console.log(`发生错误，${retryCount}秒后重试...`);
-        await new Promise(resolve => setTimeout(resolve, retryCount * 1000));
+        
+        // 为图片分析结果添加来源标记
+        const imageScenes = data.scenes.map(scene => ({
+          ...scene,
+          source: 'image'
+        }));
+        scenes.push(...imageScenes);
       }
-    }
+      
+      // 获取音乐推荐
+      const recommendations = await Promise.all(
+        scenes.map(async (scene) => {
+          const tracks = await getSpotifyRecommendations(scene.scene);
+          return tracks ? tracks.map(track => ({
+            ...track,
+            sceneSource: scene.source
+          })) : [];
+        })
+      );
 
-    setLoading(false);
+      // 合并所有推荐，并确保不重复
+      const allTracks = recommendations.flat();
+      const uniqueTracks = Array.from(
+        new Map(allTracks.map(track => [track.spotifyUrl, track]))
+        .values()
+      ).slice(0, 5);
+
+      setSceneData({
+        scenes: scenes,
+        playlist: uniqueTracks
+      });
+      
+      if (!selectedImage) {
+        setTextInput('');
+      }
+      setRecommendedMusic(uniqueTracks);
+      
+    } catch (err) {
+      console.error('处理请求时出错:', err);
+      setError(err.message || '处理过程中出错');
+    } finally {
+      setLoading(false);
+    }
   };
 
   const getErrorMessage = (status, message) => {
