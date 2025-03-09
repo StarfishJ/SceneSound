@@ -201,7 +201,7 @@ export default function SceneAnalyzer() {
     
     const searchQuery = encodeURIComponent(`${scene} music`);
     try {
-      const response = await fetch(`https://api.spotify.com/v1/search?q=${searchQuery}&type=track&limit=5`, {
+      const response = await fetch(`https://api.spotify.com/v1/search?q=${searchQuery}&type=track&limit=6`, {
         headers: {
           'Authorization': `Bearer ${spotifyToken}`
         }
@@ -215,7 +215,7 @@ export default function SceneAnalyzer() {
         previewUrl: track.preview_url
       }));
     } catch (err) {
-      console.error('获取Spotify推荐失败:', err);
+      console.error('Failed to get Spotify recommendations:', err);
       return null;
     }
   };
@@ -225,7 +225,7 @@ export default function SceneAnalyzer() {
     const hasText = !!textInput.trim();
 
     if (!hasImage && !hasText) {
-      setError('请上传图片或输入文字描述，或两者都提供');
+      setError('Please upload an image or enter text description, or both');
       return;
     }
 
@@ -252,7 +252,7 @@ export default function SceneAnalyzer() {
         
         let imageToSend = selectedImage;
         if (selectedImage.size > MAX_FILE_SIZE) {
-          console.log('压缩图片以优化上传...');
+          console.log('Compressing image for upload...');
           imageToSend = await compressImage(selectedImage);
         }
         formData.append('image', imageToSend);
@@ -270,7 +270,7 @@ export default function SceneAnalyzer() {
         
         const data = await response.json();
         if (!data.success) {
-          throw new Error(data.error || '场景分析失败');
+          throw new Error(data.error || 'Scene analysis failed');
         }
         
         // 为图片分析结果添加来源标记
@@ -297,7 +297,7 @@ export default function SceneAnalyzer() {
       const uniqueTracks = Array.from(
         new Map(allTracks.map(track => [track.spotifyUrl, track]))
         .values()
-      ).slice(0, 5);
+      ).slice(0, 6);
 
       setSceneData({
         scenes: scenes,
@@ -310,8 +310,8 @@ export default function SceneAnalyzer() {
       setRecommendedMusic(uniqueTracks);
       
     } catch (err) {
-      console.error('处理请求时出错:', err);
-      setError(err.message || '处理过程中出错');
+      console.error('Error processing request:', err);
+      setError(err.message || 'Error during processing');
     } finally {
       setLoading(false);
     }
@@ -320,19 +320,19 @@ export default function SceneAnalyzer() {
   const getErrorMessage = (status, message) => {
     switch (status) {
       case 400:
-        return '请求格式错误：' + message;
+        return 'Request format error: ' + message;
       case 502:
-        return '服务器暂时无法处理请求，正在重试...';
+        return 'Server temporarily unavailable, retrying...';
       case 413:
-        return '图片文件太大，请选择更小的图片或等待自动压缩完成。';
+        return 'Image file too large, please choose a smaller image or wait for compression.';
       case 415:
-        return '不支持的文件类型，请选择jpg、png或gif格式的图片。';
+        return 'Unsupported file type, please use jpg, png or gif format.';
       case 429:
-        return '请求过于频繁，请稍后再试。';
+        return 'Too many requests, please try again later.';
       case 504:
-        return '服务器处理超时，正在重试...';
+        return 'Server timeout, retrying...';
       default:
-        return `服务器错误 (${status}): ${message}`;
+        return `Server error (${status}): ${message}`;
     }
   };
 
@@ -491,7 +491,7 @@ export default function SceneAnalyzer() {
                     {Math.round(scene.probability * 100)}%
                   </span>
                   <span className={styles.sceneSource}>
-                    {scene.source === 'text' ? '文本输入' : '图片分析'}
+                    {scene.source === 'text' ? 'Text Input' : 'Image Analysis'}
                   </span>
                 </div>
               ))}
@@ -519,7 +519,7 @@ export default function SceneAnalyzer() {
                     <h3>{track.name}</h3>
                     <p>{track.artist}</p>
                     <span className={`${styles.sourceTag} ${styles[track.sceneSource]}`}>
-                      {track.sceneSource === 'text' ? '文本匹配' : '图片匹配'}
+                      {track.sceneSource === 'text' ? 'Text Match' : 'Image Match'}
                     </span>
                     {previewError === track.name && (
                       <p className={styles.previewError}>Preview Unavailable</p>
