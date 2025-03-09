@@ -91,6 +91,8 @@ HTML_TEMPLATE = '''
         const result = document.getElementById('result');
         const imageInput = document.getElementById('image');
         const status = document.getElementById('status');
+        const [showSpotifyDialog, setShowSpotifyDialog] = useState(false);
+        const [selectedSpotifyUrl, setSelectedSpotifyUrl] = useState(null);
 
         // 检查服务器状态
         async function checkHealth() {
@@ -162,6 +164,20 @@ HTML_TEMPLATE = '''
             } finally {
                 loading.style.display = 'none';
             }
+        };
+
+        const handleSpotifyClick = (e, spotifyUrl) => {
+            e.preventDefault();
+            e.stopPropagation();
+            setSelectedSpotifyUrl(spotifyUrl);
+            setShowSpotifyDialog(true);
+        };
+
+        const handleSpotifyConfirm = () => {
+            if (selectedSpotifyUrl) {
+                window.open(selectedSpotifyUrl, '_blank');
+            }
+            setShowSpotifyDialog(false);
         };
     </script>
 </body>
