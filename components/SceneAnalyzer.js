@@ -244,6 +244,16 @@ export default function SceneAnalyzer() {
         const controller = new AbortController();
         const timeoutId = setTimeout(() => controller.abort(), 60000);
 
+        const commonConfig = {
+          method: 'POST',
+          mode: 'cors',
+          credentials: 'omit',
+          headers: {
+            'Accept': 'application/json'
+          },
+          signal: controller.signal
+        };
+
         try {
           if (hasImage) {
             // 图片分析（可能包含文本）使用FormData格式
@@ -265,22 +275,21 @@ export default function SceneAnalyzer() {
 
             console.log('发送图片分析请求');
             response = await fetch(`${baseUrl}/analyze`, {
-              method: 'POST',
-              body: formData,
-              signal: controller.signal
+              ...commonConfig,
+              body: formData
             });
           } else {
             // 纯文本分析使用JSON格式
             console.log('发送纯文本分析请求');
             response = await fetch(`${baseUrl}/analyze`, {
-              method: 'POST',
+              ...commonConfig,
               headers: {
+                ...commonConfig.headers,
                 'Content-Type': 'application/json'
               },
               body: JSON.stringify({
                 text: textInput.trim()
-              }),
-              signal: controller.signal
+              })
             });
           }
 
