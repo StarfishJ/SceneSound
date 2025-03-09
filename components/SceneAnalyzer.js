@@ -202,30 +202,48 @@ export default function SceneAnalyzer() {
     const searchQuery = encodeURIComponent(`${scene} music`);
     try {
         // 增加limit以确保有足够的歌曲可以筛选
-        const response = await fetch(`https://api.spotify.com/v1/search?q=${searchQuery}&type=track&limit=20`, {
+        const response = await fetch(`https://api.spotify.com/v1/search?q=${searchQuery}&type=track&limit=50`, {
             headers: {
                 'Authorization': `Bearer ${spotifyToken}`
             }
         });
         const data = await response.json();
         
-        // 使用Set来去除重复的歌曲（基于歌曲名称和艺术家的组合）
-        const uniqueTracks = new Map();
-        data.tracks.items.forEach(track => {
-            const key = `${track.name}-${track.artists[0].name}`;
-            if (!uniqueTracks.has(key)) {
-                uniqueTracks.set(key, {
-                    name: track.name,
-                    artist: track.artists[0].name,
-                    albumImageUrl: track.album.images[0].url,
-                    spotifyUrl: track.external_urls.spotify,
-                    previewUrl: track.preview_url
-                });
+        // 使用Set来跟踪已经选择的歌手和专辑
+        const selectedArtists = new Set();
+        const selectedAlbums = new Set();
+        const uniqueTracks = [];
+
+        // 遍历所有歌曲，选择不重复的歌手和专辑
+        for (const track of data.tracks.items) {
+            const artistName = track.artists[0].name;
+            const albumName = track.album.name;
+            
+            // 如果歌手或专辑已经被选择，跳过这首歌
+            if (selectedArtists.has(artistName) || selectedAlbums.has(albumName)) {
+                continue;
             }
-        });
+            
+            // 添加到结果中
+            uniqueTracks.push({
+                name: track.name,
+                artist: artistName,
+                albumImageUrl: track.album.images[0].url,
+                spotifyUrl: track.external_urls.spotify,
+                previewUrl: track.preview_url
+            });
+            
+            // 记录已选择的歌手和专辑
+            selectedArtists.add(artistName);
+            selectedAlbums.add(albumName);
+            
+            // 如果已经收集到足够的歌曲，就停止
+            if (uniqueTracks.length >= 6) {
+                break;
+            }
+        }
         
-        // 转换回数组并只返回前6首歌
-        return Array.from(uniqueTracks.values()).slice(0, 6);
+        return uniqueTracks;
     } catch (err) {
         console.error('Failed to get Spotify recommendations:', err);
         return null;
@@ -332,13 +350,23 @@ export default function SceneAnalyzer() {
         })
       );
 
-      // 合并所有推荐，并确保不重复（使用歌曲名称和艺术家的组合作为唯一标识）
+      // 合并所有推荐，并确保不重复（使用歌手和专辑作为额外的去重条件）
+      const selectedArtists = new Set();
+      const selectedAlbums = new Set();
       const uniqueTracksMap = new Map();
+      
       recommendations.flat().forEach(track => {
-        const key = `${track.name}-${track.artist}`;
-        if (!uniqueTracksMap.has(key)) {
-          uniqueTracksMap.set(key, track);
-        }
+          // 如果歌手或专辑已经存在，跳过这首歌
+          if (selectedArtists.has(track.artist) || selectedAlbums.has(track.name)) {
+              return;
+          }
+          
+          const key = `${track.name}-${track.artist}`;
+          if (!uniqueTracksMap.has(key)) {
+              uniqueTracksMap.set(key, track);
+              selectedArtists.add(track.artist);
+              selectedAlbums.add(track.name);
+          }
       });
       
       const uniqueTracks = Array.from(uniqueTracksMap.values()).slice(0, 6);
