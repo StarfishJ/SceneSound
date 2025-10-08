@@ -58,6 +58,14 @@
   animation: slideDown 0.5s ease-out;
 }
 
+.backendNote {
+  text-align: center;
+  margin-top: -1rem;
+  margin-bottom: 1.5rem;
+  font-size: 0.85rem;
+  color: rgba(255, 255, 255, 0.6);
+}
+
 .uploadSection {
   background: rgba(255, 255, 255, 0.1);
   border-radius: 1rem;
