@@ -9,7 +9,6 @@ import io
 import gc
 import time
 import hashlib
-from functools import lru_cache
 
 # 配置日志
 logging.basicConfig(level=logging.DEBUG)
@@ -23,26 +22,27 @@ app = Flask(__name__)
 PORT = int(os.getenv('PORT', 5000))
 ALLOWED_ORIGINS = [
     'https://scene-sound.vercel.app',
+    'https://scenesound.vercel.app',  # 添加这个域名
     'http://localhost:3000',
     'http://localhost:3001',
     'http://localhost:10000'
 ]
 
-# 配置CORS
+# 配置CORS - 更宽松的配置
 CORS(
     app, 
     resources={
         r"/analyze": {
             "origins": ALLOWED_ORIGINS,
-            "methods": ["POST", "OPTIONS"],
-            "allow_headers": ["Content-Type", "Accept", "Origin"],
+            "methods": ["POST", "OPTIONS", "GET"],
+            "allow_headers": ["Content-Type", "Accept", "Origin", "Authorization"],
             "expose_headers": ["Content-Type"],
             "supports_credentials": False,
             "max_age": 3600
         },
         r"/health": {
             "origins": "*",
-            "methods": ["GET"],
+            "methods": ["GET", "OPTIONS"],
             "max_age": 3600
         }
     }
@@ -256,11 +256,21 @@ def after_request(response):
     origin = request.headers.get('Origin')
     
     # 允许本地开发环境和生产环境
-    if origin:
+    if origin and origin in ALLOWED_ORIGINS:
         response.headers.update({
             'Access-Control-Allow-Origin': origin,
             'Access-Control-Allow-Methods': 'POST, OPTIONS, GET',
-            'Access-Control-Allow-Headers': 'Content-Type, Accept, Origin',
+            'Access-Control-Allow-Headers': 'Content-Type, Accept, Origin, Authorization',
+            'Access-Control-Expose-Headers': 'Content-Type',
+            'Access-Control-Max-Age': '3600',
+            'Cache-Control': 'no-store, no-cache, must-revalidate, max-age=0'
+        })
+    elif origin and origin.startswith('https://scene'):
+        # 允许所有scene相关的域名
+        response.headers.update({
+            'Access-Control-Allow-Origin': origin,
+            'Access-Control-Allow-Methods': 'POST, OPTIONS, GET',
+            'Access-Control-Allow-Headers': 'Content-Type, Accept, Origin, Authorization',
             'Access-Control-Expose-Headers': 'Content-Type',
             'Access-Control-Max-Age': '3600',
             'Cache-Control': 'no-store, no-cache, must-revalidate, max-age=0'
@@ -407,11 +417,16 @@ def analyze():
         }), 500
 
 # 添加健康检查端点
-@app.route('/health', methods=['GET'])
+@app.route('/health', methods=['GET', 'OPTIONS'])
 def health_check():
+    if request.method == 'OPTIONS':
+        return '', 204
+    
     return jsonify({
         'status': 'healthy',
-        'message': 'Service is running'
+        'message': 'Service is running',
+        'timestamp': time.time(),
+        'cors_origins': ALLOWED_ORIGINS
     })
 
 if __name__ == '__main__':

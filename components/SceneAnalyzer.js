@@ -455,7 +455,9 @@ export default function SceneAnalyzer() {
       case 400:
         return 'Request format error: ' + message;
       case 502:
-        return 'Server temporarily unavailable, retrying...';
+        return 'Backend service is temporarily unavailable. Please try again in a few moments.';
+      case 503:
+        return 'Backend service is overloaded. Please try again later.';
       case 413:
         return 'Image file too large, please choose a smaller image or wait for compression.';
       case 415:
@@ -465,6 +467,9 @@ export default function SceneAnalyzer() {
       case 504:
         return 'Server timeout, retrying...';
       default:
+        if (message && message.includes('CORS')) {
+          return 'Network connection issue. Please refresh the page and try again.';
+        }
         return `Server error (${status}): ${message}`;
     }
   };
@@ -517,9 +522,28 @@ export default function SceneAnalyzer() {
     checkMobile();
   }, []);
 
-  // 在组件加载时获取Spotify令牌
+  // 检查后端服务状态
+  const checkBackendHealth = async () => {
+    try {
+      const response = await fetch('https://scenesound-backend.fly.dev/health');
+      if (response.ok) {
+        const data = await response.json();
+        console.log('Backend service is healthy:', data);
+        return true;
+      } else {
+        console.warn('Backend service health check failed:', response.status);
+        return false;
+      }
+    } catch (error) {
+      console.error('Backend service is not available:', error);
+      return false;
+    }
+  };
+
+  // 在组件加载时获取Spotify令牌并检查后端状态
   useEffect(() => {
     getSpotifyToken();
+    checkBackendHealth();
   }, []);
 
   // 在组件卸载时清理音频
