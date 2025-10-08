@@ -204,7 +204,7 @@ export default function SceneAnalyzer() {
   const getSpotifyToken = async () => {
     try {
       console.log('正在获取Spotify token...');
-      const response = await fetch('/api/spotify-token');
+      const response = await fetch('https://scenesound-api-ajbhhuagd9hkf4b6.northeurope-01.azurewebsites.net/api/spotify-token');
       if (!response.ok) {
         throw new Error(`Token request failed: ${response.status}`);
       }
