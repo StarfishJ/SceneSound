@@ -180,6 +180,7 @@ export default function SceneAnalyzer() {
   // 获取Spotify访问令牌
   const getSpotifyToken = async () => {
     try {
+      console.log('正在获取Spotify token...');
       const response = await fetch('/api/spotify-token');
       if (!response.ok) {
         throw new Error(`Token request failed: ${response.status}`);
@@ -190,24 +191,41 @@ export default function SceneAnalyzer() {
       }
       console.log('Successfully got Spotify token');
       setSpotifyToken(data.access_token);
+      return data.access_token;
     } catch (err) {
       console.error('Failed to get Spotify token:', err);
+      throw err; // 重新抛出错误以便调用者处理
     }
   };
 
   // 根据场景获取Spotify推荐
   const getSpotifyRecommendations = async (scene) => {
-    if (!spotifyToken) return null;
+    if (!spotifyToken) {
+      console.warn('Spotify token not available for recommendations');
+      return [];
+    }
     
     const searchQuery = encodeURIComponent(`${scene} music`);
     try {
+        console.log(`Searching Spotify for: ${scene}`);
         // 增加limit以确保有足够的歌曲可以筛选
         const response = await fetch(`https://api.spotify.com/v1/search?q=${searchQuery}&type=track&limit=50`, {
             headers: {
                 'Authorization': `Bearer ${spotifyToken}`
             }
         });
+        
+        if (!response.ok) {
+          console.error(`Spotify API error: ${response.status}`);
+          return [];
+        }
+        
         const data = await response.json();
+        
+        if (!data.tracks || !data.tracks.items) {
+          console.warn('No tracks found in Spotify response');
+          return [];
+        }
         
         // 使用Set来跟踪已经选择的歌手和专辑
         const selectedArtists = new Set();
@@ -216,6 +234,10 @@ export default function SceneAnalyzer() {
 
         // 遍历所有歌曲，选择不重复的歌手和专辑
         for (const track of data.tracks.items) {
+            if (!track.artists || !track.artists[0] || !track.album) {
+              continue; // 跳过不完整的track数据
+            }
+            
             const artistName = track.artists[0].name;
             const albumName = track.album.name;
             
@@ -228,8 +250,8 @@ export default function SceneAnalyzer() {
             uniqueTracks.push({
                 name: track.name,
                 artist: artistName,
-                albumImageUrl: track.album.images[0].url,
-                spotifyUrl: track.external_urls.spotify,
+                albumImageUrl: track.album.images && track.album.images[0] ? track.album.images[0].url : '',
+                spotifyUrl: track.external_urls ? track.external_urls.spotify : '',
                 previewUrl: track.preview_url
             });
             
@@ -243,10 +265,11 @@ export default function SceneAnalyzer() {
             }
         }
         
+        console.log(`Found ${uniqueTracks.length} unique tracks for scene: ${scene}`);
         return uniqueTracks;
     } catch (err) {
         console.error('Failed to get Spotify recommendations:', err);
-        return null;
+        return []; // 返回空数组而不是null
     }
   };
 
@@ -339,14 +362,30 @@ export default function SceneAnalyzer() {
         }
       }
       
+      // 确保Spotify token已获取，如果没有则等待或重试
+      if (!spotifyToken) {
+        console.log('Spotify token not available, attempting to get it...');
+        try {
+          await getSpotifyToken();
+        } catch (tokenError) {
+          console.warn('Failed to get Spotify token:', tokenError);
+          // 即使没有token也继续处理，只是不会有音乐推荐
+        }
+      }
+      
       // 获取音乐推荐
       const recommendations = await Promise.all(
         scenes.map(async (scene) => {
-          const tracks = await getSpotifyRecommendations(scene.scene);
-          return tracks ? tracks.map(track => ({
-            ...track,
-            sceneSource: scene.source
-          })) : [];
+          try {
+            const tracks = await getSpotifyRecommendations(scene.scene);
+            return tracks ? tracks.map(track => ({
+              ...track,
+              sceneSource: scene.source
+            })) : [];
+          } catch (error) {
+            console.warn(`Failed to get recommendations for scene "${scene.scene}":`, error);
+            return []; // 返回空数组而不是null
+          }
         })
       );
 
