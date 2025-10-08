@@ -5,6 +5,7 @@ export default function SceneAnalyzer() {
   const [selectedImage, setSelectedImage] = useState(null);
   const [imagePreview, setImagePreview] = useState('');
   const [loading, setLoading] = useState(false);
+  const [loadingStep, setLoadingStep] = useState('');
   const [error, setError] = useState('');
   const [sceneData, setSceneData] = useState(null);
   const [textInput, setTextInput] = useState('');
@@ -30,6 +31,14 @@ export default function SceneAnalyzer() {
           // 计算新的尺寸，保持宽高比
           let { width, height } = img;
           const maxSize = Math.max(width, height);
+          
+          // 优化：如果图片已经很小，直接返回
+          if (maxSize <= maxDimension && file.size <= MAX_FILE_SIZE) {
+            console.log('图片已经足够小，无需压缩');
+            resolve(file);
+            return;
+          }
+          
           if (maxSize > maxDimension) {
             const ratio = maxDimension / maxSize;
             width = Math.floor(width * ratio);
@@ -42,9 +51,9 @@ export default function SceneAnalyzer() {
           canvas.height = height;
           const ctx = canvas.getContext('2d');
           
-          // 使用双线性插值算法进行缩放
+          // 使用更快的插值算法
           ctx.imageSmoothingEnabled = true;
-          ctx.imageSmoothingQuality = 'high';
+          ctx.imageSmoothingQuality = 'medium'; // 改为medium以提高速度
           ctx.drawImage(img, 0, 0, width, height);
 
           // 转换为blob，使用渐进式JPEG
@@ -61,7 +70,7 @@ export default function SceneAnalyzer() {
               // 如果压缩后仍然太大，继续压缩
               if (blob.size > MAX_FILE_SIZE) {
                 console.log('尝试进一步压缩...');
-                const newQuality = quality * 0.8;
+                const newQuality = Math.max(quality * 0.7, 0.3); // 限制最低质量
                 canvas.toBlob(
                   (finalBlob) => {
                     if (!finalBlob) {
@@ -285,6 +294,7 @@ export default function SceneAnalyzer() {
     setLoading(true);
     setError('');
     setSceneData(null);
+    setLoadingStep('Preparing analysis...');
 
     const maxRetries = 3;
     let retryCount = 0;
@@ -294,6 +304,7 @@ export default function SceneAnalyzer() {
       
       // 如果有文本输入，直接作为场景关键词
       if (hasText) {
+        setLoadingStep('Processing text input...');
         scenes.push({
           scene: textInput.trim(),
           probability: 1.0,
@@ -303,6 +314,7 @@ export default function SceneAnalyzer() {
       
       // 如果有图片，发送到后端分析
       if (hasImage) {
+        setLoadingStep('Compressing image...');
         const baseUrl = 'https://scenesound-backend.fly.dev';
         console.log('Using backend URL:', baseUrl);
         
@@ -315,9 +327,13 @@ export default function SceneAnalyzer() {
         }
         formData.append('image', imageToSend);
 
+        setLoadingStep('Uploading image to server...');
+
         while (retryCount < maxRetries) {
           try {
             console.log(`Attempt ${retryCount + 1} of ${maxRetries}`);
+            setLoadingStep(`Analyzing image... (attempt ${retryCount + 1}/${maxRetries})`);
+            
             const response = await fetch(`${baseUrl}/analyze`, {
               method: 'POST',
               mode: 'cors',
@@ -357,6 +373,7 @@ export default function SceneAnalyzer() {
             if (retryCount === maxRetries) {
               throw error;
             }
+            setLoadingStep(`Retrying... (${retryCount}/${maxRetries})`);
             await new Promise(resolve => setTimeout(resolve, 1000 * retryCount));
           }
         }
@@ -364,6 +381,7 @@ export default function SceneAnalyzer() {
       
       // 确保Spotify token已获取，如果没有则等待或重试
       if (!spotifyToken) {
+        setLoadingStep('Getting music service authorization...');
         console.log('Spotify token not available, attempting to get it...');
         try {
           await getSpotifyToken();
@@ -374,6 +392,7 @@ export default function SceneAnalyzer() {
       }
       
       // 获取音乐推荐
+      setLoadingStep('Searching for recommended music...');
       const recommendations = await Promise.all(
         scenes.map(async (scene) => {
           try {
@@ -388,6 +407,8 @@ export default function SceneAnalyzer() {
           }
         })
       );
+
+      setLoadingStep('organizing results...');
 
       // 合并所有推荐，并确保不重复（使用歌手和专辑作为额外的去重条件）
       const selectedArtists = new Set();
@@ -425,6 +446,7 @@ export default function SceneAnalyzer() {
       setError(err.message || 'Error during processing');
     } finally {
       setLoading(false);
+      setLoadingStep('');
     }
   };
 
@@ -580,8 +602,20 @@ export default function SceneAnalyzer() {
             className={styles.analyzeButton}
             disabled={loading}
           >
-            {loading ? 'Analyzing...' : 'Analyze'}
+            {loading ? (
+              <div className={styles.loadingContent}>
+                <div className={styles.spinner}></div>
+                <span>{loadingStep || 'Analyzing...'}</span>
+              </div>
+            ) : 'Analyze'}
           </button>
+
+          {loading && (
+            <div className={styles.loadingTip}>
+              💡 AI may take a few seconds to analyze the image scene...
+                 Please retry if it takes too long.
+            </div>
+          )}
 
           {error && (
             <div className={styles.error}>{error}</div>
