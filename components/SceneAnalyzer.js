@@ -105,6 +105,20 @@ export default function SceneAnalyzer() {
     });
   };
 
+  // 将文件转换为Base64（去掉dataURL头部）
+  const fileToBase64 = (file) => {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => {
+        const result = reader.result || '';
+        const base64 = typeof result === 'string' ? (result.split(',')[1] || result) : '';
+        resolve(base64);
+      };
+      reader.onerror = () => reject(new Error('图片Base64转换失败'));
+      reader.readAsDataURL(file);
+    });
+  };
+
   const handleImageSelect = async (e) => {
     const file = e.target.files[0];
     if (!file) return;
@@ -312,37 +326,44 @@ export default function SceneAnalyzer() {
         });
       }
       
-      // 如果有图片，发送到后端分析
+      // 如果有图片，发送到后端分析（以Base64 JSON方式）
       if (hasImage) {
         setLoadingStep('Compressing image...');
-        const baseUrl = 'https://scenesound-backend.fly.dev';
+        const baseUrl = 'https://scenesound-api-ajbhhuagd9hkf4b6.northeurope-01.azurewebsites.net';
         console.log('Using backend URL:', baseUrl);
-        
-        const formData = new FormData();
-        
+
         let imageToSend = selectedImage;
         if (selectedImage.size > MAX_FILE_SIZE) {
           console.log('Compressing image for upload...');
           imageToSend = await compressImage(selectedImage);
         }
-        formData.append('image', imageToSend);
 
-        setLoadingStep('Uploading image to server...');
+        const base64Image = await fileToBase64(imageToSend);
+
+        setLoadingStep('Sending request to server...');
 
         while (retryCount < maxRetries) {
           try {
             console.log(`Attempt ${retryCount + 1} of ${maxRetries}`);
             setLoadingStep(`Analyzing image... (attempt ${retryCount + 1}/${maxRetries})`);
-            
+
+            const payload = {
+              image: base64Image,
+            };
+            if (hasText) {
+              payload.text = textInput.trim();
+            }
+
             const response = await fetch(`${baseUrl}/analyze`, {
               method: 'POST',
               mode: 'cors',
               credentials: 'omit',
               headers: {
                 'Accept': 'application/json',
+                'Content-Type': 'application/json',
                 'Origin': window.location.origin
               },
-              body: formData
+              body: JSON.stringify(payload)
             });
 
             console.log('Response status:', response.status);
