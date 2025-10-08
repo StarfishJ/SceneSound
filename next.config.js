@@ -4,6 +4,7 @@ const nextConfig = {
   swcMinify: true,
   images: {
     domains: ['i.scdn.co', 'mosaic.scdn.co'],
+    unoptimized: true,
   },
   // 配置跨域
   async headers() {
@@ -18,6 +19,7 @@ const nextConfig = {
       },
     ];
   },
+  output: 'export',
 };
 
 module.exports = nextConfig; 
