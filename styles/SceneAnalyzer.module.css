@@ -6,9 +6,45 @@
 }
 
 .content {
-  max-width: 1200px;
+  max-width: 1400px;
   margin: 0 auto;
   animation: fadeIn 0.5s ease-in-out;
+}
+
+/* 桌面端布局 */
+@media (min-width: 1024px) {
+  .mainLayout {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 2rem;
+    align-items: start;
+  }
+  
+  .leftColumn {
+    display: flex;
+    flex-direction: column;
+    gap: 2rem;
+  }
+  
+  .rightColumn {
+    display: flex;
+    flex-direction: column;
+    gap: 2rem;
+  }
+}
+
+/* 移动端布局 */
+@media (max-width: 1023px) {
+  .mainLayout {
+    display: flex;
+    flex-direction: column;
+    gap: 2rem;
+  }
+  
+  .leftColumn,
+  .rightColumn {
+    width: 100%;
+  }
 }
 
 .title {
@@ -179,6 +215,81 @@
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(250px, 1fr));
   gap: 1.5rem;
+}
+
+/* 桌面端音乐网格调整 */
+@media (min-width: 1024px) {
+  .trackGrid {
+    grid-template-columns: 1fr;
+    gap: 1rem;
+  }
+  
+  .trackCard {
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+    padding: 1rem;
+    background: rgba(255, 255, 255, 0.05);
+    border-radius: 12px;
+    transition: all 0.3s ease;
+    cursor: pointer;
+  }
+  
+  .trackCard:hover {
+    background: rgba(255, 255, 255, 0.1);
+    transform: translateY(-2px);
+  }
+  
+  .albumCover {
+    width: 80px;
+    height: 80px;
+    flex-shrink: 0;
+    border-radius: 8px;
+    overflow: hidden;
+  }
+  
+  .trackInfo {
+    flex: 1;
+    text-align: left;
+  }
+  
+  .trackInfo h3 {
+    font-size: 1rem;
+    margin-bottom: 0.25rem;
+    color: #fff;
+  }
+  
+  .trackInfo p {
+    font-size: 0.9rem;
+    color: #ccc;
+    margin-bottom: 0.5rem;
+  }
+  
+  .sourceTag {
+    font-size: 0.75rem;
+    padding: 0.25rem 0.5rem;
+    border-radius: 4px;
+    margin-right: 0.5rem;
+  }
+  
+  .spotifyLink {
+    margin-top: 0.5rem;
+    display: inline-block;
+  }
+}
+
+/* 移动端保持原有样式 */
+@media (max-width: 1023px) {
+  .trackCard {
+    display: block;
+    text-align: center;
+  }
+  
+  .albumCover {
+    width: 100%;
+    height: auto;
+    aspect-ratio: 1;
+  }
 }
 
 .trackCard {
