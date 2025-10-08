@@ -4,24 +4,9 @@ A web application that analyzes images and text to recommend music based on the 
 
 ## Deployment Information
 
-- Frontend: Deployed on Vercel (https://scene-sound.vercel.app)
-- Backend: Deployed on Fly.io (https://scenesound-backend.fly.dev)
-- Database: None (Stateless application)
-
-## Environment Variables
-
-### Frontend (.env.local)
-```
-NEXT_PUBLIC_BACKEND_URL=https://scenesound-backend.fly.dev
-SPOTIFY_CLIENT_ID=your_spotify_client_id
-SPOTIFY_CLIENT_SECRET=your_spotify_client_secret
-```
-
-### Backend
-The backend service is configured to run on Fly.io with the following specifications:
-- Memory: 1GB RAM
-- CPU: 1 shared CPU
-- Region: Tokyo (nrt)
+- Frontend: Deployed on Vercel (https://scene-sound.vercel.app) and Azure Static Web
+- Backend: Deployed on Azure App Services
+- Model:PyTorch(Places 365) / Huggingface (cloud version)
 
 ## Development
 
