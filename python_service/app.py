@@ -1,53 +1,21 @@
-from flask import Flask, request, jsonify, render_template_string
+from flask import Flask, request, jsonify
 from flask_cors import CORS
+import base64
+import io
 from PIL import Image
 import os
+import requests
 from places365_model import Places365Model
 import logging
-from dotenv import load_dotenv
-import io
-import gc
 import time
+import gc
 import hashlib
-
-# 配置日志
-logging.basicConfig(level=logging.DEBUG)
-logger = logging.getLogger(__name__)
-
-load_dotenv()
 
 app = Flask(__name__)
 
-# 获取环境变量
-PORT = int(os.getenv('PORT', 5000))
-ALLOWED_ORIGINS = [
-    'https://scene-sound.vercel.app',
-    'https://scenesound.vercel.app',  # 添加这个域名
-    'http://localhost:3000',
-    'http://localhost:3001',
-    'http://localhost:10000'
-]
-
-# 配置CORS - 更宽松的配置
-CORS(
-    app, 
-    resources={
-        r"/analyze": {
-            "origins": ALLOWED_ORIGINS,
-            "methods": ["POST", "OPTIONS", "GET"],
-            "allow_headers": ["Content-Type", "Accept", "Origin", "Authorization"],
-            "expose_headers": ["Content-Type"],
-            "supports_credentials": False,
-            "max_age": 3600
-        },
-        r"/health": {
-            "origins": "*",
-            "methods": ["GET", "OPTIONS"],
-            "max_age": 3600
-        }
-    }
-)
-app.debug = True  # 启用调试模式
+# 配置日志
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 # 配置常量
 MAX_IMAGE_SIZE = (400, 400)  # 减小最大图片尺寸以提高处理速度
@@ -55,154 +23,28 @@ MAX_FILE_SIZE = 2 * 1024 * 1024  # 2MB
 
 # 初始化模型
 try:
+    logger.info("正在初始化 Places365 模型...")
     model = Places365Model()
     logger.info("模型初始化成功")
 except Exception as e:
     logger.error(f"模型初始化失败: {str(e)}")
-    raise
+    model = None
 
 # 简单的内存缓存
 prediction_cache = {}
 
-# HTML 测试页面
-HTML_TEMPLATE = '''
-<!DOCTYPE html>
-<html>
-<head>
-    <title>场景分析测试</title>
-    <meta charset="utf-8">
-    <style>
-        body { font-family: Arial, sans-serif; max-width: 800px; margin: 0 auto; padding: 20px; }
-        .form-group { margin-bottom: 20px; }
-        #result { margin-top: 20px; white-space: pre-wrap; }
-        .loading { display: none; color: #666; }
-        .error { color: red; }
-        .status { margin-top: 10px; color: #666; }
-    </style>
-</head>
-<body>
-    <h1>场景分析测试</h1>
-    <form id="uploadForm">
-        <div class="form-group">
-            <label for="image">选择图片（最大5MB）：</label>
-            <input type="file" id="image" name="image" accept="image/*">
-        </div>
-        <button type="submit">分析</button>
-        <div id="loading" class="loading">处理中，请稍候...</div>
-        <div id="status" class="status"></div>
-    </form>
-    <div id="result"></div>
-
-    <script>
-        const form = document.getElementById('uploadForm');
-        const loading = document.getElementById('loading');
-        const result = document.getElementById('result');
-        const imageInput = document.getElementById('image');
-        const status = document.getElementById('status');
-
-        // 检查服务器状态
-        async function checkHealth() {
-            try {
-                const response = await fetch('/health');
-                const data = await response.json();
-                status.textContent = `服务器状态: ${data.status}`;
-            } catch (error) {
-                status.textContent = `服务器状态检查失败: ${error.message}`;
-            }
-        }
-
-        // 定期检查服务器状态
-        checkHealth();
-        setInterval(checkHealth, 30000);
-
-        imageInput.onchange = function() {
-            const file = this.files[0];
-            if (file) {
-                if (file.size > 5 * 1024 * 1024) {
-                    result.innerHTML = '<div class="error">错误：图片大小不能超过5MB</div>';
-                    this.value = '';
-                    return;
-                }
-                if (!file.type.startsWith('image/')) {
-                    result.innerHTML = '<div class="error">错误：请选择图片文件</div>';
-                    this.value = '';
-                    return;
-                }
-                // 显示图片信息
-                status.textContent = `已选择图片: ${file.name}, 大小: ${(file.size/1024).toFixed(2)}KB`;
-            }
-        };
-
-        form.onsubmit = async (e) => {
-            e.preventDefault();
-            const formData = new FormData();
-            const imageFile = imageInput.files[0];
-            
-            if (!imageFile) {
-                result.innerHTML = '<div class="error">错误：请选择一张图片</div>';
-                return;
-            }
-            
-            formData.append('image', imageFile);
-            loading.style.display = 'block';
-            result.textContent = '';
-            status.textContent = '正在上传并处理图片...';
-            
-            try {
-                const startTime = Date.now();
-                const response = await fetch('/analyze', {
-                    method: 'POST',
-                    body: formData
-                });
-                const endTime = Date.now();
-                
-                if (!response.ok) {
-                    const errorText = await response.text();
-                    throw new Error(`请求失败: ${response.status} - ${errorText}`);
-                }
-                
-                const data = await response.json();
-                result.textContent = JSON.stringify(data, null, 2);
-                status.textContent = `处理完成，耗时: ${(endTime - startTime)/1000}秒`;
-            } catch (error) {
-                result.innerHTML = `<div class="error">错误：${error.message}</div>`;
-                status.textContent = '处理失败';
-            } finally {
-                loading.style.display = 'none';
-            }
-        };
-    </script>
-</body>
-</html>
-'''
-
-@app.route('/', methods=['GET'])
-def index():
-    logger.info("访问根路由 /")
+def process_image_from_base64(image_data):
+    """从Base64数据处理图片，包括大小检查和压缩"""
     try:
-        return render_template_string(HTML_TEMPLATE)
-    except Exception as e:
-        logger.error(f"渲染模板失败: {str(e)}")
-        return str(e), 500
-
-@app.route('/test', methods=['GET'])
-def test():
-    logger.info("访问测试路由 /test")
-    return "服务器正在运行"
-
-def process_image(image_file):
-    """处理上传的图片，包括大小检查和压缩"""
-    try:
-        # 检查文件大小
-        image_file.seek(0, io.SEEK_END)
-        file_size = image_file.tell()
-        image_file.seek(0)
+        # 解码Base64数据
+        image_bytes = base64.b64decode(image_data)
         
-        if file_size > MAX_FILE_SIZE:
-            raise ValueError('Image file too large (max 5MB)')
+        # 检查文件大小
+        if len(image_bytes) > MAX_FILE_SIZE:
+            raise ValueError('Image file too large (max 2MB)')
         
         # 使用 PIL 的高效读取模式
-        image = Image.open(image_file)
+        image = Image.open(io.BytesIO(image_bytes))
         
         # 检查图片格式
         if image.format not in ['JPEG', 'PNG', 'WebP']:
@@ -233,9 +75,8 @@ def process_image(image_file):
             image.close()
             image = new_image
             
-        # 强制加载图片数据到内存并释放文件句柄
+        # 强制加载图片数据到内存
         image.load()
-        image_file.close()
         
         # 主动进行垃圾回收
         gc.collect()
@@ -243,12 +84,29 @@ def process_image(image_file):
         return image
     except Exception as e:
         logger.error(f"处理图片时出错: {str(e)}")
-        if image_file and not image_file.closed:
-            image_file.close()
         if 'image' in locals():
             image.close()
         gc.collect()
         raise
+
+# 明确允许的前端来源（Vercel 和 Azure Static Web Apps）
+ALLOWED_ORIGINS = [
+    "https://scene-sound.vercel.app",
+    "https://lively-hill-05f432c0f.2.azurestaticapps.net",
+]
+
+# 启用并限制到特定 origins，允许常用头和方法
+CORS(
+    app,
+    resources={r"/*": {
+        "origins": ALLOWED_ORIGINS,
+        "methods": ["GET", "POST", "OPTIONS"],
+        "allow_headers": ["Content-Type", "Accept", "Origin", "Authorization"],
+        "expose_headers": ["Content-Type"],
+        "supports_credentials": False,
+        "max_age": 3600,
+    }}
+)
 
 @app.after_request
 def after_request(response):
@@ -284,152 +142,136 @@ def after_request(response):
 
 @app.route('/analyze', methods=['POST', 'OPTIONS'])
 def analyze():
-    """处理分析请求，支持图片和文本，或两者组合"""
-    # 处理预检请求
     if request.method == 'OPTIONS':
-        return '', 204
-        
-    image = None
+        # 预检请求快速通过，由 Flask-CORS 注入头
+        return ("", 204)
+    start_time = time.time()
     try:
-        logger.info("开始处理分析请求")
-        logger.info(f"请求头: {dict(request.headers)}")
+        data = request.get_json()
         
-        # 初始化场景列表
-        scenes = []
-        start_time = time.time()
-        
-        # 检查是否是JSON格式的纯文本请求
-        if request.is_json:
-            data = request.get_json()
-            if not data or 'text' not in data:
-                logger.error("JSON请求中没有文本内容")
-                return jsonify({'error': 'No text in request'}), 400
-                
-            text = data['text'].strip()
-            if not text:
-                logger.error("文本内容为空")
-                return jsonify({'error': 'Empty text'}), 400
-                
-            logger.info(f"收到文本：{text}")
+        if 'image' in data:
+            # 处理图片分析
+            logger.info("收到图片分析请求")
             
-            # 直接使用文本作为场景关键词
-            scenes.append({
-                'scene': text,
-                'probability': 1.0,
-                'source': 'text'
-            })
-            
-            total_time = time.time() - start_time
-            logger.info(f"文本处理完成，总时间: {total_time:.2f}秒")
-            
-            return jsonify({
-                'success': True,
-                'scenes': scenes,
-                'processing_time': {
-                    'total': total_time
-                }
-            })
-        
-        # 处理文本输入（如果有）
-        text = request.form.get('text', '').strip()
-        if text:
-            logger.info(f"收到文本：{text}")
-            scenes.append({
-                'scene': text,
-                'probability': 1.0,
-                'source': 'text'
-            })
-        
-        # 处理图片请求（如果有）
-        if 'image' in request.files:
-            image_file = request.files['image']
-            if image_file.filename:
-                logger.info(f"收到图片：{image_file.filename}")
+            try:
+                # 处理和压缩图片
+                image_start = time.time()
+                image = process_image_from_base64(data['image'])
+                process_time = time.time() - image_start
+                logger.info(f"图片处理完成，尺寸: {image.size}，处理时间: {process_time:.2f}秒")
                 
-                try:
-                    # 处理和压缩图片
-                    image_start = time.time()
-                    image = process_image(image_file)
-                    process_time = time.time() - image_start
-                    logger.info(f"图片处理完成，尺寸: {image.size}，处理时间: {process_time:.2f}秒")
-                    
-                    # 预测场景
-                    predict_start = time.time()
-                    
-                    # 生成图片哈希用于缓存
-                    image_hash = hashlib.md5(image.tobytes()).hexdigest()
-                    
-                    # 检查缓存
-                    if image_hash in prediction_cache:
-                        logger.info("使用缓存结果")
-                        image_scenes = prediction_cache[image_hash]
-                    else:
+                # 预测场景
+                predict_start = time.time()
+                
+                # 生成图片哈希用于缓存
+                image_hash = hashlib.md5(image.tobytes()).hexdigest()
+                
+                # 检查缓存
+                if image_hash in prediction_cache:
+                    logger.info("使用缓存结果")
+                    image_scenes = prediction_cache[image_hash]
+                else:
+                    if model is not None:
+                        logger.info("使用 Places365 模型进行场景分析...")
                         image_scenes = model.predict(image)
+                        logger.info(f"模型分析完成，检测到 {len(image_scenes)} 个场景")
                         # 缓存结果（限制缓存大小）
                         if len(prediction_cache) < 100:  # 最多缓存100个结果
                             prediction_cache[image_hash] = image_scenes
-                    
-                    predict_time = time.time() - predict_start
-                    logger.info(f"场景预测完成，耗时: {predict_time:.2f}秒")
-                    
-                    # 为图片分析结果添加来源标记
-                    for scene in image_scenes:
-                        scene['source'] = 'image'
-                    scenes.extend(image_scenes)
-                    
-                except ValueError as ve:
-                    logger.error(f"图片验证错误：{str(ve)}")
-                    return jsonify({'error': str(ve)}), 400
-                except Exception as e:
-                    logger.error(f"处理图片时出错：{str(e)}", exc_info=True)
-                    return jsonify({'error': f'Image processing error: {str(e)}'}), 500
-                finally:
-                    if image:
-                        image.close()
-                        del image
-                    gc.collect()
-        
-        # 如果既没有文本也没有图片，返回错误
-        if not scenes:
-            logger.error("请求中既没有文本也没有图片")
-            return jsonify({'error': 'No text or image in request'}), 400
+                    else:
+                        logger.warning("模型未初始化，返回默认场景")
+                        image_scenes = [{"scene": "general", "probability": 0.5}]
+                
+                predict_time = time.time() - predict_start
+                logger.info(f"场景预测完成，耗时: {predict_time:.2f}秒")
+                
+                # 为图片分析结果添加来源标记
+                for scene in image_scenes:
+                    scene['source'] = 'image'
+                scenes = image_scenes
+                
+            except ValueError as ve:
+                logger.error(f"图片验证错误：{str(ve)}")
+                return jsonify({'error': str(ve)}), 400
+            except Exception as e:
+                logger.error(f"处理图片时出错：{str(e)}", exc_info=True)
+                return jsonify({'error': f'Image processing error: {str(e)}'}), 500
+            finally:
+                if 'image' in locals():
+                    image.close()
+                    del image
+                gc.collect()
+            
+        elif 'text' in data:
+            # 处理文本输入
+            scenes = [{
+                'scene': data['text'],
+                'probability': 1.0,
+                'source': 'text'
+            }]
+        else:
+            return jsonify({"error": "No image or text provided"}), 400
         
         total_time = time.time() - start_time
         logger.info(f"总处理时间: {total_time:.2f}秒")
         
         return jsonify({
-            'success': True,
-            'scenes': scenes,
-            'processing_time': {
-                'total': total_time
+            "success": True,
+            "scenes": scenes,
+            "processing_time": {
+                "total": total_time
             }
         })
-                
+        
     except Exception as e:
-        logger.error(f"处理请求时发生错误：{str(e)}", exc_info=True)
-        if image:
-            image.close()
-            del image
-        gc.collect()
-        return jsonify({
-            'success': False,
-            'error': str(e)
-        }), 500
+        return jsonify({"error": str(e)}), 500
 
-# 添加健康检查端点
 @app.route('/health', methods=['GET', 'OPTIONS'])
-def health_check():
+def health():
     if request.method == 'OPTIONS':
-        return '', 204
+        return ("", 204)
     
     return jsonify({
         'status': 'healthy',
         'message': 'Service is running',
         'timestamp': time.time(),
-        'cors_origins': ALLOWED_ORIGINS
+        'cors_origins': ALLOWED_ORIGINS,
+        'model_loaded': model is not None
     })
 
+@app.route('/api/spotify-token', methods=['GET', 'OPTIONS'])
+def get_spotify_token():
+    if request.method == 'OPTIONS':
+        return ("", 204)
+    """获取Spotify访问令牌"""
+    client_id = os.environ.get('SPOTIFY_CLIENT_ID')
+    client_secret = os.environ.get('SPOTIFY_CLIENT_SECRET')
+    
+    if not client_id or not client_secret:
+        return jsonify({"error": "Spotify credentials not configured"}), 500
+    
+    try:
+        # 创建认证字符串
+        auth_string = f"{client_id}:{client_secret}"
+        auth_bytes = auth_string.encode('utf-8')
+        auth_base64 = base64.b64encode(auth_bytes).decode('utf-8')
+        
+        # 请求token
+        url = "https://accounts.spotify.com/api/token"
+        headers = {
+            "Authorization": f"Basic {auth_base64}",
+            "Content-Type": "application/x-www-form-urlencoded"
+        }
+        data = {"grant_type": "client_credentials"}
+        
+        response = requests.post(url, headers=headers, data=data)
+        response.raise_for_status()
+        
+        token_data = response.json()
+        return jsonify(token_data)
+        
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
 if __name__ == '__main__':
-    port = int(os.getenv('PORT', 8080))
-    logger.info("启动服务器...")
-    app.run(host='0.0.0.0', port=port) 
+    app.run(debug=True)
