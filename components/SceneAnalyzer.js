@@ -581,6 +581,7 @@ export default function SceneAnalyzer() {
     <div className={styles.container}>
       <div className={styles.content}>
         <h1 className={styles.title}>SceneSound</h1>
+        <div className={styles.backendNote}>Backend: Azure App Service</div>
         
         <div className={styles.mainLayout}>
           <div className={styles.leftColumn}>
