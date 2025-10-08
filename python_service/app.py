@@ -8,6 +8,8 @@ from dotenv import load_dotenv
 import io
 import gc
 import time
+import hashlib
+from functools import lru_cache
 
 # 配置日志
 logging.basicConfig(level=logging.DEBUG)
@@ -48,8 +50,8 @@ CORS(
 app.debug = True  # 启用调试模式
 
 # 配置常量
-MAX_IMAGE_SIZE = (800, 800)  # 最大图片尺寸
-MAX_FILE_SIZE = 5 * 1024 * 1024  # 5MB
+MAX_IMAGE_SIZE = (400, 400)  # 减小最大图片尺寸以提高处理速度
+MAX_FILE_SIZE = 2 * 1024 * 1024  # 2MB
 
 # 初始化模型
 try:
@@ -58,6 +60,9 @@ try:
 except Exception as e:
     logger.error(f"模型初始化失败: {str(e)}")
     raise
+
+# 简单的内存缓存
+prediction_cache = {}
 
 # HTML 测试页面
 HTML_TEMPLATE = '''
@@ -223,8 +228,8 @@ def process_image(image_file):
                 int(image.size[0] * ratio),
                 int(image.size[1] * ratio)
             )
-            # 缩放并立即释放原始图像
-            new_image = image.resize(new_size, Image.Resampling.LANCZOS)
+            # 使用更快的缩放算法
+            new_image = image.resize(new_size, Image.Resampling.NEAREST)
             image.close()
             image = new_image
             
@@ -340,7 +345,20 @@ def analyze():
                     
                     # 预测场景
                     predict_start = time.time()
-                    image_scenes = model.predict(image)
+                    
+                    # 生成图片哈希用于缓存
+                    image_hash = hashlib.md5(image.tobytes()).hexdigest()
+                    
+                    # 检查缓存
+                    if image_hash in prediction_cache:
+                        logger.info("使用缓存结果")
+                        image_scenes = prediction_cache[image_hash]
+                    else:
+                        image_scenes = model.predict(image)
+                        # 缓存结果（限制缓存大小）
+                        if len(prediction_cache) < 100:  # 最多缓存100个结果
+                            prediction_cache[image_hash] = image_scenes
+                    
                     predict_time = time.time() - predict_start
                     logger.info(f"场景预测完成，耗时: {predict_time:.2f}秒")
                     
