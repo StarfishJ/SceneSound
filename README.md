@@ -2,7 +2,7 @@
 
 A web application that analyzes images and text to recommend music based on the detected scenes.
 
-## Deployment Information
+## Deployment Information (upgrade from an on-dege application to cloud application)
 
 - Frontend: Deployed on Vercel (https://scene-sound.vercel.app) and Azure Static Web
 - Backend: Deployed on Azure App Services
